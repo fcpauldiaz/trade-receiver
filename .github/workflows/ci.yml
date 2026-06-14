@@ -12,5 +12,6 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
       - run: mkdir -p data
-      - run: DATABASE_URL=sqlite:///./data/test.db pytest
+      - run: rm -f data/test.db
       - run: DATABASE_URL=sqlite:///./data/test.db alembic upgrade head
+      - run: DATABASE_URL=sqlite:///./data/test.db pytest
