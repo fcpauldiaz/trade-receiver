@@ -21,13 +21,12 @@ def _decrypt_creds(value: str | None) -> str:
 def get_adapter(connection: BrokerConnection) -> BrokerAdapter:
     creds = _decrypt_creds(connection.encrypted_credentials)
     if connection.broker == "tradier":
-        token = creds or None
-        return TradierAdapter(access_token=token, account_id=connection.account_id)
+        return TradierAdapter(access_token=creds, account_id=connection.account_id)
     if connection.broker == "schwab":
         return SchwabAdapter(access_token=creds or None)
     if connection.broker == "webull":
         return WebullAdapter(access_token=creds or None)
-    return TradierAdapter()
+    raise ValueError(f"Unsupported broker: {connection.broker}")
 
 
 async def fetch_chain(adapter: BrokerAdapter, underlying: str, expiration: date | None) -> list[OptionContract]:

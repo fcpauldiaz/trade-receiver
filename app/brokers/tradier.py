@@ -1,5 +1,7 @@
+import base64
 from datetime import date
 from decimal import Decimal
+from urllib.parse import urlencode
 
 import httpx
 
@@ -11,9 +13,11 @@ class TradierAdapter:
     name = "tradier"
 
     def __init__(self, access_token: str | None = None, account_id: str | None = None):
-        self.access_token = access_token or settings.tradier_access_token or ""
-        self.account_id = account_id or settings.tradier_account_id or ""
-        self.base = settings.tradier_api_base
+        if not access_token:
+            raise ValueError("Tradier connection missing access token")
+        self.access_token = access_token
+        self.account_id = account_id or ""
+        self.base = settings.tradier_api_base.rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -21,11 +25,59 @@ class TradierAdapter:
             "Accept": "application/json",
         }
 
+    @staticmethod
+    def authorization_url(state: str) -> str:
+        params = urlencode({
+            "client_id": settings.tradier_client_id or "",
+            "scope": settings.tradier_oauth_scope,
+            "state": state,
+        })
+        oauth_base = settings.tradier_api_base.replace("/v1", "")
+        return f"{oauth_base}/v1/oauth/authorize?{params}"
+
+    @staticmethod
+    async def exchange_code(code: str) -> dict:
+        creds = base64.b64encode(
+            f"{settings.tradier_client_id}:{settings.tradier_client_secret}".encode()
+        ).decode()
+        oauth_base = settings.tradier_api_base.replace("/v1", "")
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{oauth_base}/v1/oauth/accesstoken",
+                headers={
+                    "Authorization": f"Basic {creds}",
+                    "Accept": "application/json",
+                },
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                },
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def fetch_primary_account_id(self) -> str | None:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.base}/user/profile",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                return None
+            data = resp.json()
+        accounts = data.get("profile", {}).get("account", [])
+        if isinstance(accounts, dict):
+            accounts = [accounts]
+        if not accounts:
+            return None
+        account = accounts[0]
+        if isinstance(account, dict):
+            return str(account.get("account_number") or account.get("id") or "")
+        return None
+
     async def get_option_chain(
         self, underlying: str, expiration: date | None = None
     ) -> list[OptionContract]:
-        if not self.access_token:
-            return []
         params: dict[str, str] = {"symbol": underlying.upper()}
         if expiration:
             params["expiration"] = expiration.isoformat()
@@ -60,8 +112,14 @@ class TradierAdapter:
     async def place_order(
         self, contract: OptionContract, quantity: int, side: str, mode: str
     ) -> OrderResult:
-        if not self.access_token or not self.account_id:
-            return OrderResult(success=False, order_id=None, fill_price=None, raw_response={}, error="not configured")
+        if not self.account_id:
+            return OrderResult(
+                success=False,
+                order_id=None,
+                fill_price=None,
+                raw_response={},
+                error="Tradier account id missing on connection",
+            )
         if mode == "paper" and "sandbox" not in self.base:
             return OrderResult(
                 success=True,
