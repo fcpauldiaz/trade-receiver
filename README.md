@@ -10,7 +10,7 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-Database defaults to `sqlite+libsql:///./data/trade.db`.
+Database defaults to `sqlite:///./data/trade.db` (standard SQLite). For Turso, set `DATABASE_URL=sqlite+libsql://...` and `TURSO_AUTH_TOKEN`.
 
 ## Deploy on Coolify
 
