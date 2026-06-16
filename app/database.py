@@ -6,6 +6,13 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.config import settings
 
 
+def _resolve_database_url(url: str) -> str:
+    # Local file paths do not need the libsql driver (e.g. Coolify with sqlite+libsql:///./data/...)
+    if url.startswith("sqlite+libsql:///"):
+        return "sqlite://" + url.removeprefix("sqlite+libsql://")
+    return url
+
+
 def _ensure_dialect(url: str) -> None:
     if "libsql" not in url:
         return
@@ -13,13 +20,12 @@ def _ensure_dialect(url: str) -> None:
         import sqlalchemy_libsql  # noqa: F401, PLC0415
     except ImportError as exc:
         raise RuntimeError(
-            "DATABASE_URL uses libsql but sqlalchemy-libsql is not installed. "
-            "Use sqlite:///./data/trade.db for local SQLite, or ensure requirements are installed."
+            "DATABASE_URL uses remote libsql/Turso but sqlalchemy-libsql is not installed."
         ) from exc
 
 
 def _build_engine():
-    url = settings.database_url
+    url = _resolve_database_url(settings.database_url)
     _ensure_dialect(url)
     connect_args: dict = {}
     if settings.turso_auth_token and "libsql" in url:
