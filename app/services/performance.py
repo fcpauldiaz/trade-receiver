@@ -1,4 +1,3 @@
-from collections import defaultdict
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -44,11 +43,11 @@ def daily_pnl(db: Session, user_id: str, month: str) -> dict[str, float]:
         )
     ).all()
 
-    by_day: dict[str, float] = defaultdict(float)
+    by_day: dict[str, float] = {}
     for row in rows:
         day = row.created_at.strftime("%Y-%m-%d")
-        by_day[day] += float(row.pnl or 0)
-    return dict(by_day)
+        by_day[day] = by_day.get(day, 0.0) + float(row.pnl or 0)
+    return by_day
 
 
 def performance_summary(db: Session, user_id: str) -> dict:
@@ -64,8 +63,15 @@ def performance_summary(db: Session, user_id: str) -> dict:
     wins = sum(1 for r in rows if (r.pnl or 0) > 0)
     total = len(rows)
     win_rate = (wins / total * 100) if total else 0.0
+
+    now = datetime.utcnow()
+    month_start = datetime(now.year, now.month, 1)
+    mtd_rows = [r for r in rows if r.created_at >= month_start]
+    mtd_pnl = sum(float(r.pnl or 0) for r in mtd_rows)
+
     return {
         "total_trades": total,
         "total_pnl": total_pnl,
+        "mtd_pnl": round(mtd_pnl, 2),
         "win_rate": round(win_rate, 2),
     }

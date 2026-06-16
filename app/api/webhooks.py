@@ -8,6 +8,7 @@ from app.agents.decide_action import decide_action
 from app.agents.parse_alert import parse_alert
 from app.database import get_db
 from app.models.tables import BrokerConnection, InboundAlert, User
+from app.services.compute_quantity import compute_quantity
 from app.services.entitlements import can_process_trades, require_active_subscription
 from app.services.execute_trade import execute_trade
 from app.services.option_chain import get_adapter
@@ -15,6 +16,16 @@ from app.services.validate_trade import validate_trade
 from app.services.webhook_normalize import idempotency_key, normalize_webhook_body
 
 router = APIRouter(tags=["webhooks"])
+
+
+def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | None:
+    if user.default_broker:
+        conn = db.query(BrokerConnection).filter_by(
+            user_id=user.id, broker=user.default_broker, status="connected"
+        ).first()
+        if conn:
+            return conn
+    return db.query(BrokerConnection).filter_by(user_id=user.id, status="connected").first()
 
 
 def _get_user(db: Session, user_id: str, secret: str) -> User:
@@ -69,19 +80,24 @@ async def receive_webhook(user_id: str, secret: str, request: Request, db: Sessi
         db.commit()
         return {"status": "skipped", "reason": alert.skip_reason}
 
-    connection = (
-        db.query(BrokerConnection)
-        .filter_by(user_id=user_id, status="connected")
-        .first()
-    )
+    connection = _resolve_broker_connection(db, user)
     if connection is None:
         alert.skip_reason = "no broker connected"
         alert.processed = True
         db.commit()
         return {"status": "skipped", "reason": alert.skip_reason}
 
-    adapter = get_adapter(connection)
+    adapter = await get_adapter(db, connection)
     validated = await validate_trade(intent, connection.broker, adapter)
+
+    quantity, sizing_skip = await compute_quantity(user, validated, adapter)
+    if sizing_skip:
+        alert.skip_reason = sizing_skip
+        alert.processed = True
+        db.commit()
+        return {"status": "skipped", "reason": alert.skip_reason}
+
+    validated = validated.model_copy(update={"quantity": quantity})
     execution = await execute_trade(db, user, alert, validated, adapter)
     return {
         "status": execution.status,

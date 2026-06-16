@@ -16,8 +16,16 @@ class Settings(BaseSettings):
     lemon_squeezy_webhook_secret: str | None = None
     lemon_squeezy_api_key: str | None = None
 
+    environment: str = "development"
+    cors_extra_origins: str | None = None
+
+    better_auth_url: str = "http://localhost:3000"
+    internal_api_secret: str = "dev-internal-secret"
+
     receiver_base_url: str = "http://localhost:8000"
     platform_base_url: str = "http://localhost:3000"
+
+    lemon_squeezy_customer_portal_url: str | None = None
 
     tradier_api_base: str = "https://sandbox.tradier.com/v1"
     tradier_client_id: str | None = None

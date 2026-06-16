@@ -2,15 +2,19 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+
+COPY pyproject.toml README.md requirements.txt ./
 COPY app ./app
 COPY alembic ./alembic
 COPY alembic.ini ./
+COPY start.sh ./
 
-RUN pip install --no-cache-dir -e .
-
-RUN mkdir -p data
+RUN pip install --no-cache-dir -e . \
+    && chmod +x start.sh \
+    && mkdir -p data
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start.sh"]

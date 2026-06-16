@@ -18,6 +18,23 @@ MONTH_MAP = {
 }
 
 
+def _extract_quantity(text: str) -> int:
+    upper = text.upper()
+    patterns = [
+        r"\b(?:QTY|QUANTITY)\s*[:=]?\s*(\d+)\b",
+        r"\b(\d+)\s*(?:CONTRACTS?|CT|LOTS?)\b",
+        r"\b[xX]\s*(\d+)\b",
+        r"\b(\d+)\s*[xX]\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, upper)
+        if match:
+            qty = int(match.group(1))
+            if qty >= 1:
+                return qty
+    return 1
+
+
 def _parse_expiration(token: str) -> date | None:
     token = token.strip().replace("/", "-")
     m = re.match(r"^(\d{1,2})-(\d{1,2})(?:-(\d{2,4}))?$", token)
@@ -77,6 +94,7 @@ def parse_alert_rules(text: str) -> TradeIntent:
             expiration = exp
             break
 
+    quantity = _extract_quantity(text)
     confidence = 0.85 if action != "skip" and underlying and strike > 0 and expiration else 0.3
     return TradeIntent(
         action=action,
@@ -84,7 +102,7 @@ def parse_alert_rules(text: str) -> TradeIntent:
         option_type=option_type,
         strike=strike,
         expiration=expiration,
-        quantity=1,
+        quantity=quantity,
         confidence=confidence,
         rationale="rule-based parse",
     )
@@ -105,7 +123,9 @@ async def _parse_with_openai(text: str) -> TradeIntent:
     schema = TradeIntent.model_json_schema()
     prompt = (
         "Parse this options trade alert into structured JSON. "
-        "Use action skip if not a trade alert.\n\n" + text
+        "Use action skip if not a trade alert. "
+        "Include quantity (number of contracts); default to 1 if not specified in the alert.\n\n"
+        + text
     )
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(

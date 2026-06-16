@@ -1,0 +1,11 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+sqlalchemy>=2.0.36
+sqlalchemy-libsql>=0.2.0
+alembic>=1.14.0
+pydantic[email]>=2.10.0
+pydantic-settings>=2.6.0
+httpx>=0.28.0
+PyJWT[crypto]>=2.10.0
+python-multipart>=0.0.18
+cryptography>=44.0.0

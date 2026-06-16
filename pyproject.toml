@@ -19,12 +19,16 @@ dependencies = [
     "pydantic[email]>=2.10.0",
     "pydantic-settings>=2.6.0",
     "httpx>=0.28.0",
+    "PyJWT[crypto]>=2.10.0",
     "python-multipart>=0.0.18",
     "cryptography>=44.0.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "httpx>=0.28.0"]
+
+[project.scripts]
+trade-receiver = "app.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

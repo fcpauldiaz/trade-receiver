@@ -45,6 +45,23 @@ class FakeAdapter:
             raw_response={"simulated": True, "mode": mode},
         )
 
+    async def get_positions(self):
+        return [{"symbol": "SPY260620C00580000", "quantity": 10}]
+
+    async def get_order_status(self, order_id: str):
+        return {"status": "FILLED"}
+
+    async def get_account_equity(self):
+        return Decimal("100000")
+
+    async def place_equity_order(self, symbol: str, quantity: int, side: str, mode: str) -> OrderResult:
+        return OrderResult(
+            success=True,
+            order_id=f"paper-{symbol}",
+            fill_price=None,
+            raw_response={"simulated": True, "mode": mode, "symbol": symbol, "quantity": quantity},
+        )
+
 
 @pytest.fixture()
 def db_session(monkeypatch):
@@ -64,7 +81,11 @@ def db_session(monkeypatch):
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
-    monkeypatch.setattr("app.api.webhooks.get_adapter", lambda conn: FakeAdapter())
+
+    async def fake_get_adapter(db, conn):
+        return FakeAdapter()
+
+    monkeypatch.setattr("app.api.webhooks.get_adapter", fake_get_adapter)
     db = SessionLocal()
     yield db
     db.close()

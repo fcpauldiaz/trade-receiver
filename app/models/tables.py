@@ -17,6 +17,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    better_auth_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
     api_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     webhook_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
     webhook_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -24,12 +25,32 @@ class User(Base):
     max_contracts: Mapped[int] = mapped_column(Integer, default=1)
     allowed_tickers: Mapped[str | None] = mapped_column(Text, nullable=True)
     live_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    sizing_mode: Mapped[str] = mapped_column(String(32), default="alert_inferred")
+    fixed_contracts: Mapped[int] = mapped_column(Integer, default=1)
+    risk_percent: Mapped[float] = mapped_column(Float, default=1.0)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
+    default_broker: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
     broker_connections: Mapped[list["BrokerConnection"]] = relationship(back_populates="user")
     alerts: Mapped[list["InboundAlert"]] = relationship(back_populates="user")
     trades: Mapped[list["TradeExecution"]] = relationship(back_populates="user")
+    review: Mapped["Review | None"] = relationship(back_populates="user", uselist=False)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), unique=True, index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    body: Mapped[str] = mapped_column(Text)
+    author_name: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="review")
 
 
 class Subscription(Base):
@@ -79,6 +100,15 @@ class InboundAlert(Base):
     user: Mapped["User"] = relationship(back_populates="alerts")
 
 
+class ProcessedWebhookEvent(Base):
+    __tablename__ = "processed_webhook_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source: Mapped[str] = mapped_column(String(32))
+    event_id: Mapped[str] = mapped_column(String(128), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 class TradeExecution(Base):
     __tablename__ = "trade_executions"
 
@@ -98,6 +128,7 @@ class TradeExecution(Base):
     pnl: Mapped[float | None] = mapped_column(Float, nullable=True)
     intent_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     broker_response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="trades")

@@ -54,4 +54,4 @@ def verify_oauth_state(state: str, broker: str) -> str:
 
 def oauth_success_redirect(broker: str) -> str:
     base = settings.platform_base_url.rstrip("/")
-    return f"{base}/connections?connected={broker}"
+    return f"{base}/onboarding?broker={broker}"

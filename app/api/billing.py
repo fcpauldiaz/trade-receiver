@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models.tables import User
+from app.models.tables import ProcessedWebhookEvent, User
 from app.services.entitlements import (
     can_process_trades,
     ensure_webhook_secret,
@@ -29,6 +29,7 @@ class BillingStatus(BaseModel):
     ends_at: datetime | None
     can_process_trades: bool
     webhook_enabled: bool
+    customer_portal_url: str | None = None
 
 
 @router.get("/me/billing", response_model=BillingStatus)
@@ -41,6 +42,7 @@ def get_billing(user: User = Depends(get_current_user), db: Session = Depends(ge
         ends_at=sub.ends_at if sub else None,
         can_process_trades=can_process_trades(user),
         webhook_enabled=user.webhook_enabled,
+        customer_portal_url=settings.lemon_squeezy_customer_portal_url,
     )
 
 
@@ -66,6 +68,11 @@ async def lemon_squeezy_webhook(
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     payload = json.loads(body)
+    event_id = str(payload.get("meta", {}).get("event_id") or payload.get("data", {}).get("id") or "")
+    if event_id:
+        seen = db.query(ProcessedWebhookEvent).filter_by(event_id=event_id).first()
+        if seen:
+            return {"ok": True, "duplicate": True}
     event_name = payload.get("meta", {}).get("event_name", "")
     attrs = payload.get("data", {}).get("attributes", {})
     custom = payload.get("meta", {}).get("custom_data", {}) or {}
@@ -105,6 +112,9 @@ async def lemon_squeezy_webhook(
     )
     if status == "active":
         ensure_webhook_secret(user)
+        db.commit()
+    if event_id:
+        db.add(ProcessedWebhookEvent(source="lemon_squeezy", event_id=event_id))
         db.commit()
     return {"ok": True}
 

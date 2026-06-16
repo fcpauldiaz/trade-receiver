@@ -153,3 +153,103 @@ class TradierAdapter:
                 )
             order_id = str(body.get("order", {}).get("id", ""))
             return OrderResult(success=True, order_id=order_id, fill_price=contract.ask, raw_response=body)
+
+    async def get_account_equity(self) -> Decimal | None:
+        if not self.account_id:
+            return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.base}/accounts/{self.account_id}/balances",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                return None
+            data = resp.json()
+        balances = data.get("balances", {})
+        total = balances.get("total_equity") or balances.get("total_cash")
+        if total is None:
+            return None
+        return Decimal(str(total))
+
+    async def place_equity_order(self, symbol: str, quantity: int, side: str, mode: str) -> OrderResult:
+        if not self.account_id:
+            return OrderResult(
+                success=False,
+                order_id=None,
+                fill_price=None,
+                raw_response={},
+                error="Tradier account id missing on connection",
+            )
+        if mode == "paper" and "sandbox" not in self.base:
+            return OrderResult(
+                success=True,
+                order_id=f"paper-{symbol}",
+                fill_price=None,
+                raw_response={"simulated": True, "mode": "paper", "symbol": symbol, "quantity": quantity},
+            )
+        data = {
+            "class": "equity",
+            "symbol": symbol.upper(),
+            "side": side,
+            "quantity": str(quantity),
+            "type": "market",
+            "duration": "day",
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{self.base}/accounts/{self.account_id}/orders",
+                headers=self._headers(),
+                data=data,
+            )
+            body = resp.json() if resp.content else {}
+            if resp.status_code >= 400:
+                return OrderResult(
+                    success=False,
+                    order_id=None,
+                    fill_price=None,
+                    raw_response=body,
+                    error=str(body),
+                )
+            order_id = str(body.get("order", {}).get("id", ""))
+            return OrderResult(
+                success=True,
+                order_id=order_id,
+                fill_price=None,
+                raw_response=body,
+            )
+
+    async def get_positions(self) -> list[dict]:
+        if not self.account_id:
+            return []
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.base}/accounts/{self.account_id}/positions",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                return []
+            data = resp.json()
+        positions = []
+        for pos in data.get("positions", {}).get("position", []) or []:
+            if isinstance(pos, dict):
+                positions.append({
+                    "symbol": pos.get("symbol", ""),
+                    "asset_type": "OPTION" if pos.get("option_symbol") else "EQUITY",
+                    "quantity": float(pos.get("quantity") or 0),
+                })
+        return positions
+
+    async def get_order_status(self, order_id: str) -> dict | None:
+        if not self.account_id or not order_id:
+            return None
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.get(
+                f"{self.base}/accounts/{self.account_id}/orders/{order_id}",
+                headers=self._headers(),
+            )
+            if resp.status_code >= 400:
+                return None
+            data = resp.json()
+        order = data.get("order", data)
+        status = str(order.get("status", "")).upper()
+        return {"status": "FILLED" if status == "FILLED" else status, "order": order}
