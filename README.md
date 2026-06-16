@@ -12,21 +12,23 @@ uvicorn app.main:app --reload
 
 Database defaults to `sqlite:///./data/trade.db` (standard SQLite). For Turso, set `DATABASE_URL=sqlite+libsql://...` and `TURSO_AUTH_TOKEN`.
 
-## Deploy on Coolify
+## Deploy on Coolify (Dockerfile)
 
-Coolify/Nixpacks reads `pyproject.toml` and may try `python -m trade-receiver`, which fails (hyphens are invalid in Python module names). This repo ships explicit start config instead.
-
-**Recommended:** use the included **Dockerfile** (Build Pack → **Dockerfile**, not Nixpacks).
+Use the repo **Dockerfile** — do not use Nixpacks.
 
 | Setting | Value |
 |---------|--------|
-| Build Pack | **Dockerfile** (faster, more reliable) or Nixpacks (uses `nixpacks.toml`) |
-| Port | `8000` (or match `PORT` env) |
-| Start command | leave empty |
+| Build Pack | **Dockerfile** |
+| Dockerfile location | `/Dockerfile` |
+| Port | `8000` |
+| Start command | leave empty (uses image `CMD`) |
 
-**Nixpacks build:** `nixpacks.toml` sets the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+Set `PORT=8000` and `DATABASE_URL=sqlite:///./data/trade.db` in environment variables. Mount a persistent volume on `/app/data` for the database.
 
-Set `PORT=8000` in Coolify environment variables. Mount a persistent volume on `/app/data` for the SQLite/libSQL database.
+```bash
+docker build -t trade-receiver .
+docker run --rm -p 8000:8000 -e PORT=8000 -v trade-receiver-data:/app/data trade-receiver
+```
 
 ## Environment
 
