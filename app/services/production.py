@@ -21,3 +21,5 @@ def validate_production_settings() -> None:
         raise RuntimeError("INTERNAL_API_SECRET must be set in production")
     if not settings.better_auth_url or settings.better_auth_url.startswith("http://localhost"):
         raise RuntimeError("BETTER_AUTH_URL must be set to the public platform URL in production")
+    if "libsql" in settings.database_url and not settings.turso_auth_token:
+        raise RuntimeError("TURSO_AUTH_TOKEN must be set when DATABASE_URL uses Turso/libsql")

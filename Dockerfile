@@ -16,7 +16,8 @@ COPY alembic ./alembic
 COPY alembic.ini ./
 
 RUN pip install --no-cache-dir . \
-    && mkdir -p data
+    && mkdir -p data \
+    && python -c "import sqlalchemy_libsql; from sqlalchemy.dialects import registry; registry.load('sqlite.libsql')"
 
 EXPOSE 8000
 

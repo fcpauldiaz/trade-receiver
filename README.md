@@ -10,7 +10,14 @@ pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-Database defaults to `sqlite:///./data/trade.db` (standard SQLite). For Turso, set `DATABASE_URL=sqlite+libsql://...` and `TURSO_AUTH_TOKEN`.
+Database defaults to `sqlite:///./data/trade.db` for local dev. For **Turso**, set:
+
+```bash
+DATABASE_URL=libsql://your-db-name-org.turso.io
+TURSO_AUTH_TOKEN=your-token
+```
+
+The app converts `libsql://` to SQLAlchemy's `sqlite+libsql://` form automatically.
 
 ## Deploy on Coolify (Dockerfile)
 
@@ -23,7 +30,14 @@ Use the repo **Dockerfile** — do not use Nixpacks.
 | Port | `8000` |
 | Start command | leave empty (uses image `CMD`) |
 
-Set `PORT=8000` and `DATABASE_URL=sqlite:///./data/trade.db` in environment variables. Mount a persistent volume on `/app/data` for the database.
+Set production env vars (see `.env.example`). For Turso:
+
+| Variable | Example |
+|----------|---------|
+| `DATABASE_URL` | `libsql://your-db-org.turso.io` |
+| `TURSO_AUTH_TOKEN` | token from `turso db tokens create` |
+
+No `/app/data` volume is required for remote Turso.
 
 ```bash
 docker build -t trade-receiver .
