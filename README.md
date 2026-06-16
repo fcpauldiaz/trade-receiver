@@ -16,12 +16,13 @@ Database defaults to `sqlite+libsql:///./data/trade.db`.
 
 Coolify/Nixpacks reads `pyproject.toml` and may try `python -m trade-receiver`, which fails (hyphens are invalid in Python module names). This repo ships explicit start config instead.
 
-**Recommended:** use the included **Dockerfile** (Build Pack → Dockerfile).
+**Recommended:** use the included **Dockerfile** (Build Pack → **Dockerfile**, not Nixpacks).
 
 | Setting | Value |
 |---------|--------|
+| Build Pack | **Dockerfile** (faster, more reliable) or Nixpacks (uses `nixpacks.toml`) |
 | Port | `8000` (or match `PORT` env) |
-| Start command | leave empty (Dockerfile uses `start.sh`) |
+| Start command | leave empty |
 
 **Nixpacks build:** `nixpacks.toml` sets the start command to `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
 
