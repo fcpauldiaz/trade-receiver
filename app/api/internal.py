@@ -22,9 +22,29 @@ class ProvisionResponse(BaseModel):
     linked: bool
 
 
+class DeviceTokenRequest(BaseModel):
+    auth_id: str | None = None
+    email: EmailStr | None = None
+
+
+class DeviceTokenResponse(BaseModel):
+    api_key: str
+    ingest_url: str
+
+
 def _verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")) -> None:
     if not settings.internal_api_secret or x_internal_secret != settings.internal_api_secret:
         raise HTTPException(status_code=401, detail="Invalid internal secret")
+
+
+def _resolve_user(db: Session, auth_id: str | None, email: str | None) -> User | None:
+    if auth_id:
+        user = db.query(User).filter(User.better_auth_id == auth_id).first()
+        if user:
+            return user
+    if email:
+        return db.query(User).filter(User.email == email).first()
+    return None
 
 
 @router.post("/provision", response_model=ProvisionResponse, dependencies=[Depends(_verify_internal_secret)])
@@ -55,3 +75,18 @@ def provision_user(body: ProvisionRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return ProvisionResponse(user_id=user.id, created=True, linked=False)
+
+
+@router.post("/device-token", response_model=DeviceTokenResponse, dependencies=[Depends(_verify_internal_secret)])
+def issue_device_token(body: DeviceTokenRequest, db: Session = Depends(get_db)):
+    if not body.auth_id and not body.email:
+        raise HTTPException(status_code=400, detail="auth_id or email required")
+    user = _resolve_user(db, body.auth_id, body.email)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not provisioned")
+    api_key = generate_api_key()
+    user.api_key_hash = hash_api_key(api_key)
+    db.commit()
+    base = settings.receiver_base_url.rstrip("/")
+    path = settings.ingest_path if settings.ingest_path.startswith("/") else f"/{settings.ingest_path}"
+    return DeviceTokenResponse(api_key=api_key, ingest_url=f"{base}{path}")

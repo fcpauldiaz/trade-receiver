@@ -40,7 +40,6 @@ def _create_user(db, *, email: str, active: bool) -> tuple[User, str]:
         email=email,
         name="Test User",
         api_key_hash=hashlib.sha256(token.encode()).hexdigest(),
-        webhook_enabled=active,
     )
     db.add(user)
     db.flush()

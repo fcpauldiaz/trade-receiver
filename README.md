@@ -1,6 +1,6 @@
 # Trade Receiver
 
-FastAPI webhook receiver with AI trade parsing, Lemon Squeezy subscription gating, and multi-broker execution.
+FastAPI alert ingest service with AI trade parsing, Lemon Squeezy subscription gating, and multi-broker execution.
 
 ## Quick start
 
@@ -52,10 +52,10 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | libSQL/SQLite connection |
+| `DATABASE_URL` | libSQL/SQLite connection (shared with trade-platform auth tables) |
 | `API_SECRET_KEY` | Signs OAuth state tokens |
 | `ENCRYPTION_KEY` | Encrypts per-user broker tokens at rest |
-| `RECEIVER_BASE_URL` | Public API URL (webhook links) |
+| `RECEIVER_BASE_URL` | Public API URL (ingest + OAuth callbacks) |
 | `PLATFORM_BASE_URL` | Where OAuth redirects after connect (e.g. `http://localhost:3000`) |
 | `LEMON_SQUEEZY_WEBHOOK_SECRET` | Subscription webhook verification |
 | `BETTER_AUTH_URL` | Public platform URL — JWT issuer/JWKS for API auth |
@@ -78,7 +78,7 @@ Per-user access tokens and account IDs are stored encrypted in `broker_connectio
 | Variable | Purpose |
 |----------|---------|
 | `OPENAI_API_KEY` | LLM alert parsing (falls back to rules if unset) |
-| `TURSO_AUTH_TOKEN` | Remote libSQL auth |
+| `TURSO_AUTH_TOKEN` | Remote libSQL auth (same value on trade-platform) |
 | `WEBULL_ENABLED` | Feature flag for Webull adapter |
 
 ## Broker connect flow
@@ -103,6 +103,7 @@ sequenceDiagram
 ## API
 
 - `POST /v1/internal/provision` — create/link user from Better Auth signup (internal secret)
+- `POST /v1/internal/device-token` — issue desktop API key (internal secret)
 - `GET /v1/me` — current user (Better Auth JWT or API key)
 - `GET /v1/me/billing` — subscription status
 - `GET /v1/me/brokers/tradier/authorize` — start Tradier OAuth
@@ -115,7 +116,7 @@ sequenceDiagram
 - `PUT /v1/me/settings` — update paper/live, sizing, caps, tickers
 - `POST /v1/me/onboarding/complete` — mark onboarding finished
 - `POST /v1/me/brokers/{broker}/test-order` — place 1-share SPY test order (follows default_mode)
-- `POST /hooks/{user_id}/{secret}` — notification webhook
+- `POST /v1/ingest` — authenticated alert ingest (desktop app Bearer token)
 
 ## Trade sizing
 
@@ -127,7 +128,7 @@ Users choose a sizing mode in settings or onboarding:
 | `fixed` | Always trade `fixed_contracts` per alert |
 | `risk_percent` | Size from account equity × `risk_percent` ÷ option cost, capped by `max_contracts` |
 
-Sizing runs after option chain validation in the webhook pipeline.
+Sizing runs after option chain validation in the ingest pipeline.
 
 ## Migrations
 
@@ -148,4 +149,4 @@ DATABASE_URL=sqlite:///./data/test.db pytest
 ## Related repos
 
 - [discord-trader](https://github.com/fcpauldiaz/discord-trader) — TanStack Start UI
-- [notification-watcher](https://github.com/fcpauldiaz/discord-data-scraper) — macOS/Windows webhook sender
+- [notification-watcher](https://github.com/fcpauldiaz/discord-data-scraper) — macOS/Windows desktop alert forwarder

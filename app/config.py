@@ -25,6 +25,7 @@ class Settings(BaseSettings):
 
     receiver_base_url: str = "http://localhost:8000"
     platform_base_url: str = "http://localhost:3000"
+    ingest_path: str = "/v1/ingest"
 
     lemon_squeezy_customer_portal_url: str | None = None
 

@@ -85,7 +85,7 @@ def db_session(monkeypatch):
     async def fake_get_adapter(db, conn):
         return FakeAdapter()
 
-    monkeypatch.setattr("app.api.webhooks.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.api.ingest.get_adapter", fake_get_adapter)
     db = SessionLocal()
     yield db
     db.close()
@@ -98,12 +98,10 @@ def client(db_session: Session):
 
 
 def _seed_paid_user(db: Session) -> tuple[User, str]:
-    secret = secrets.token_urlsafe(16)
+    token = "test-api-key"
     user = User(
         email="paid@example.com",
-        api_key_hash=hashlib.sha256(b"test-api-key").hexdigest(),
-        webhook_secret=secret,
-        webhook_enabled=True,
+        api_key_hash=hashlib.sha256(token.encode()).hexdigest(),
     )
     db.add(user)
     db.flush()
@@ -118,7 +116,7 @@ def _seed_paid_user(db: Session) -> tuple[User, str]:
         )
     )
     db.commit()
-    return user, secret
+    return user, token
 
 
 def test_parse_fixture_alerts():
@@ -137,11 +135,12 @@ def test_parse_fixture_alerts():
     assert intent3.underlying == "AAPL"
 
 
-def test_webhook_e2e_paper_order(client: TestClient, db_session: Session):
-    user, secret = _seed_paid_user(db_session)
+def test_ingest_e2e_paper_order(client: TestClient, db_session: Session):
+    user, token = _seed_paid_user(db_session)
     resp = client.post(
-        f"/hooks/{user.id}/{secret}",
+        "/v1/ingest",
         json={"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -150,17 +149,18 @@ def test_webhook_e2e_paper_order(client: TestClient, db_session: Session):
         assert data["trade_id"]
 
 
-def test_webhook_rejects_inactive_subscription(client: TestClient, db_session: Session):
-    secret = secrets.token_urlsafe(16)
-    user = User(email="free@example.com", webhook_secret=secret, webhook_enabled=True)
+def test_ingest_rejects_inactive_subscription(client: TestClient, db_session: Session):
+    token = secrets.token_urlsafe(16)
+    user = User(email="free@example.com", api_key_hash=hashlib.sha256(token.encode()).hexdigest())
     db_session.add(user)
     db_session.flush()
     db_session.add(Subscription(user_id=user.id, status="none", plan_name="free"))
     db_session.commit()
 
     resp = client.post(
-        f"/hooks/{user.id}/{secret}",
+        "/v1/ingest",
         json={"title": "Alert", "body": "BTO SPY 580C 6/20"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 402
 

@@ -19,8 +19,6 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     better_auth_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
     api_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    webhook_secret: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    webhook_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_mode: Mapped[str] = mapped_column(String(16), default="paper")
     max_contracts: Mapped[int] = mapped_column(Integer, default=1)
     allowed_tickers: Mapped[str | None] = mapped_column(Text, nullable=True)

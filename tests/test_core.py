@@ -32,13 +32,13 @@ def test_normalize_discord_embed():
 
 
 def test_can_process_trades_inactive():
-    user = User(email="a@b.com", webhook_enabled=True)
+    user = User(email="a@b.com")
     user.subscription = Subscription(status="none")
     assert can_process_trades(user) is False
 
 
 def test_can_process_trades_active():
-    user = User(email="a@b.com", webhook_enabled=True)
+    user = User(email="a@b.com")
     user.subscription = Subscription(status="active")
     assert can_process_trades(user) is True
 

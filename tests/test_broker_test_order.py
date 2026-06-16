@@ -59,7 +59,6 @@ def _create_user(db, *, active: bool, live: bool = False) -> tuple[User, str]:
     user = User(
         email="paid@example.com",
         api_key_hash=hashlib.sha256(token.encode()).hexdigest(),
-        webhook_enabled=active,
         default_mode="paper",
         live_trading_enabled=live,
     )

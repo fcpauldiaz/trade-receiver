@@ -1,7 +1,4 @@
-import hashlib
-import hmac
 import json
-import secrets
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -14,7 +11,6 @@ from app.database import get_db
 from app.models.tables import ProcessedWebhookEvent, User
 from app.services.entitlements import (
     can_process_trades,
-    ensure_webhook_secret,
     upsert_subscription_from_lemon,
     verify_lemon_squeezy_signature,
 )
@@ -28,7 +24,6 @@ class BillingStatus(BaseModel):
     renews_at: datetime | None
     ends_at: datetime | None
     can_process_trades: bool
-    webhook_enabled: bool
     customer_portal_url: str | None = None
 
 
@@ -41,19 +36,8 @@ def get_billing(user: User = Depends(get_current_user), db: Session = Depends(ge
         renews_at=sub.renews_at if sub else None,
         ends_at=sub.ends_at if sub else None,
         can_process_trades=can_process_trades(user),
-        webhook_enabled=user.webhook_enabled,
         customer_portal_url=settings.lemon_squeezy_customer_portal_url,
     )
-
-
-@router.post("/me/billing/regenerate-webhook")
-def regenerate_webhook(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    if not can_process_trades(user):
-        raise HTTPException(status_code=402, detail="Active subscription required")
-    user.webhook_secret = secrets.token_urlsafe(32)
-    user.webhook_enabled = True
-    db.commit()
-    return {"webhook_secret": user.webhook_secret}
 
 
 @router.post("/webhooks/lemon-squeezy")
@@ -110,9 +94,6 @@ async def lemon_squeezy_webhook(
         renews_at=renews_at,
         ends_at=ends_at,
     )
-    if status == "active":
-        ensure_webhook_secret(user)
-        db.commit()
     if event_id:
         db.add(ProcessedWebhookEvent(source="lemon_squeezy", event_id=event_id))
         db.commit()

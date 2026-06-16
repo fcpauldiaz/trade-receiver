@@ -105,3 +105,25 @@ def test_api_key_still_works(client):
     res = http.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
     assert res.status_code == 200
     assert res.json()["email"] == "bearer@example.com"
+
+
+def test_device_token_issues_api_key(client):
+    http, db_factory = client
+    db = db_factory()
+    user = User(email="device@example.com", better_auth_id="auth-device")
+    db.add(user)
+    db.flush()
+    db.add(Subscription(user_id=user.id, status="active", plan_name="pro"))
+    db.commit()
+    db.close()
+
+    res = http.post(
+        "/v1/internal/device-token",
+        json={"auth_id": "auth-device", "email": "device@example.com"},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["api_key"]
+    assert body["ingest_url"].endswith("/v1/ingest")
+

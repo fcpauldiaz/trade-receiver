@@ -1,11 +1,11 @@
 import json
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.agents.decide_action import decide_action
 from app.agents.parse_alert import parse_alert
+from app.api.deps import get_current_user
 from app.database import get_db
 from app.models.tables import BrokerConnection, InboundAlert, User
 from app.services.compute_quantity import compute_quantity
@@ -15,7 +15,7 @@ from app.services.option_chain import get_adapter
 from app.services.validate_trade import validate_trade
 from app.services.webhook_normalize import idempotency_key, normalize_webhook_body
 
-router = APIRouter(tags=["webhooks"])
+router = APIRouter(tags=["ingest"])
 
 
 def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | None:
@@ -28,34 +28,16 @@ def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | No
     return db.query(BrokerConnection).filter_by(user_id=user.id, status="connected").first()
 
 
-def _get_user(db: Session, user_id: str, secret: str) -> User:
-    user = db.get(User, user_id)
-    if user is None or not user.webhook_secret or not secrets_compare(user.webhook_secret, secret):
-        raise HTTPException(status_code=401, detail="Invalid webhook credentials")
-    if not user.webhook_enabled:
-        raise HTTPException(status_code=402, detail="Webhook disabled — subscription required")
-    return user
-
-
-def secrets_compare(a: str, b: str) -> bool:
-    import hmac
-
-    return hmac.compare_digest(a, b)
-
-
-@router.post("/hooks/{user_id}/{secret}")
-async def receive_webhook(user_id: str, secret: str, request: Request, db: Session = Depends(get_db)):
-    user = _get_user(db, user_id, secret)
-    body = await request.json()
+async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
     text, payload = normalize_webhook_body(body)
-    key = idempotency_key(user_id, payload)
-    existing = db.query(InboundAlert).filter_by(user_id=user_id, idempotency_key=key).first()
+    key = idempotency_key(user.id, payload)
+    existing = db.query(InboundAlert).filter_by(user_id=user.id, idempotency_key=key).first()
     if existing:
         return {"status": "duplicate", "alert_id": existing.id}
 
     active = can_process_trades(user)
     alert = InboundAlert(
-        user_id=user_id,
+        user_id=user.id,
         idempotency_key=key,
         raw_payload=json.dumps(body),
         normalized_text=text,
@@ -104,3 +86,16 @@ async def receive_webhook(user_id: str, secret: str, request: Request, db: Sessi
         "trade_id": execution.id,
         "validation_errors": validated.validation_errors,
     }
+
+
+@router.post("/v1/ingest")
+async def ingest_alert(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not can_process_trades(user):
+        _, reason = require_active_subscription(user)
+        raise HTTPException(status_code=402, detail=reason)
+    body = await request.json()
+    return await _process_inbound_alert(db, user, body)

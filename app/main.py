@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
-from app.api import billing, brokers, internal, reviews, settings as settings_api, trades, users, webhooks
+from app.api import billing, brokers, ingest, internal, reviews, settings as settings_api, trades, users
 from app.config import settings as app_settings
 from app.database import engine
 from app.middleware.rate_limit import RateLimitMiddleware
@@ -36,7 +36,7 @@ app.add_middleware(
 )
 app.add_middleware(RateLimitMiddleware)
 
-app.include_router(webhooks.router)
+app.include_router(ingest.router)
 app.include_router(internal.router)
 app.include_router(users.router)
 app.include_router(billing.router)

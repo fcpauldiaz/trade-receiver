@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -18,7 +17,7 @@ def _in_cancelled_grace(sub: Subscription) -> bool:
 
 def can_process_trades(user: User) -> bool:
     sub = user.subscription
-    if sub is None or not user.webhook_enabled:
+    if sub is None:
         return False
     if sub.status == "active":
         return True
@@ -33,15 +32,8 @@ def require_active_subscription(user: User) -> tuple[bool, str]:
     return True, ""
 
 
-def ensure_webhook_secret(user: User) -> str:
-    if not user.webhook_secret:
-        user.webhook_secret = secrets.token_urlsafe(32)
-    return user.webhook_secret
-
-
-def disable_webhook_on_lapse(db: Session, user: User) -> None:
-    user.webhook_enabled = False
-    user.webhook_secret = secrets.token_urlsafe(32)
+def revoke_device_access(db: Session, user: User) -> None:
+    user.api_key_hash = None
     db.commit()
 
 
@@ -75,15 +67,12 @@ def upsert_subscription_from_lemon(
     sub.plan_name = plan_name
     sub.renews_at = renews_at
     sub.ends_at = ends_at
-    if status == "active":
-        user.webhook_enabled = True
-        ensure_webhook_secret(user)
-    elif status == "cancelled" and ends_at and ends_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
-        ensure_webhook_secret(user)
-    elif status in ("expired", "past_due"):
-        disable_webhook_on_lapse(db, user)
-    elif status == "cancelled":
-        disable_webhook_on_lapse(db, user)
+    if status in ("expired", "past_due", "cancelled"):
+        if status == "cancelled" and ends_at and ends_at.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+            db.commit()
+            db.refresh(sub)
+            return sub
+        revoke_device_access(db, user)
     db.commit()
     db.refresh(sub)
     return sub
