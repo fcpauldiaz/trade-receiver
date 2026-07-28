@@ -76,6 +76,7 @@ class BrokerConnection(Base):
     broker: Mapped[str] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(32), default="disconnected")
     account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    environment: Mapped[str | None] = mapped_column(String(16), nullable=True)
     encrypted_credentials: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -28,7 +28,11 @@ async def get_adapter(db: Session, connection: BrokerConnection) -> BrokerAdapte
     access_token = bundle.get("access_token", raw)
 
     if connection.broker == "tradier":
-        return TradierAdapter(access_token=access_token, account_id=connection.account_id)
+        return TradierAdapter(
+            access_token=access_token,
+            account_id=connection.account_id,
+            environment=connection.environment,
+        )
     if connection.broker == "schwab":
         return SchwabAdapter(
             access_token=access_token,
@@ -46,7 +50,11 @@ def get_adapter_sync(connection: BrokerConnection) -> BrokerAdapter:
     bundle = parse_credentials(raw)
     access_token = bundle.get("access_token", raw)
     if connection.broker == "tradier":
-        return TradierAdapter(access_token=access_token, account_id=connection.account_id)
+        return TradierAdapter(
+            access_token=access_token,
+            account_id=connection.account_id,
+            environment=connection.environment,
+        )
     if connection.broker == "schwab":
         return SchwabAdapter(
             access_token=access_token,

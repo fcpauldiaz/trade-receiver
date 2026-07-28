@@ -63,7 +63,7 @@ def test_tradier_token_connect(client, monkeypatch):
 
     resp = test_client.post(
         "/v1/me/brokers/tradier/token",
-        json={"access_token": "sandbox-token-abc"},
+        json={"access_token": "sandbox-token-abc", "environment": "sandbox"},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 200
@@ -71,12 +71,82 @@ def test_tradier_token_connect(client, monkeypatch):
     assert data["broker"] == "tradier"
     assert data["status"] == "connected"
     assert data["account_id"] == "VA999"
+    assert data["environment"] == "sandbox"
 
     db = SessionLocal()
     conn = db.query(BrokerConnection).filter_by(user_id=user_id, broker="tradier").first()
     assert conn is not None
     assert conn.status == "connected"
     assert conn.account_id == "VA999"
+    assert conn.environment == "sandbox"
+    user = db.get(User, user_id)
+    assert user is not None
+    assert user.default_mode == "paper"
+    db.close()
+
+
+def test_tradier_token_connect_live(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    user_id = user.id
+    db.close()
+
+    monkeypatch.setattr(
+        "app.api.brokers.TradierAdapter.fetch_primary_account_id",
+        AsyncMock(return_value="6YA00000"),
+    )
+
+    resp = test_client.post(
+        "/v1/me/brokers/tradier/token",
+        json={"access_token": "live-token-abc", "environment": "live"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["environment"] == "live"
+
+    db = SessionLocal()
+    conn = db.query(BrokerConnection).filter_by(user_id=user_id, broker="tradier").first()
+    assert conn is not None
+    assert conn.environment == "live"
+    user = db.get(User, user_id)
+    assert user is not None
+    assert user.default_mode == "live"
+    assert user.live_trading_enabled is True
+    db.close()
+
+
+def test_tradier_token_switch_environment(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    user_id = user.id
+    db.close()
+
+    monkeypatch.setattr(
+        "app.api.brokers.TradierAdapter.fetch_primary_account_id",
+        AsyncMock(side_effect=["VA999", "6YA00000"]),
+    )
+
+    assert test_client.post(
+        "/v1/me/brokers/tradier/token",
+        json={"access_token": "sandbox-token", "environment": "sandbox"},
+        headers={"Authorization": f"Bearer {token}"},
+    ).status_code == 200
+
+    resp = test_client.post(
+        "/v1/me/brokers/tradier/token",
+        json={"access_token": "live-token", "environment": "live"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["environment"] == "live"
+
+    db = SessionLocal()
+    conn = db.query(BrokerConnection).filter_by(user_id=user_id, broker="tradier").first()
+    assert conn is not None
+    assert conn.environment == "live"
+    assert conn.account_id == "6YA00000"
     db.close()
 
 
@@ -93,7 +163,7 @@ def test_tradier_token_connect_rejects_bad_token(client, monkeypatch):
 
     resp = test_client.post(
         "/v1/me/brokers/tradier/token",
-        json={"access_token": "bad"},
+        json={"access_token": "bad", "environment": "sandbox"},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
@@ -107,7 +177,7 @@ def test_tradier_token_requires_subscription(client):
 
     resp = test_client.post(
         "/v1/me/brokers/tradier/token",
-        json={"access_token": "sandbox-token-abc"},
+        json={"access_token": "sandbox-token-abc", "environment": "sandbox"},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 402

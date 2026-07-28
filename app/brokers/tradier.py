@@ -6,18 +6,25 @@ from urllib.parse import urlencode
 import httpx
 
 from app.brokers.base import BrokerAdapter, OptionContract, OrderResult
+from app.brokers.tradier_env import normalize_tradier_environment, tradier_api_base
 from app.config import settings
 
 
 class TradierAdapter:
     name = "tradier"
 
-    def __init__(self, access_token: str | None = None, account_id: str | None = None):
+    def __init__(
+        self,
+        access_token: str | None = None,
+        account_id: str | None = None,
+        environment: str | None = None,
+    ):
         if not access_token:
             raise ValueError("Tradier connection missing access token")
         self.access_token = access_token
         self.account_id = account_id or ""
-        self.base = settings.tradier_api_base.rstrip("/")
+        self.environment = normalize_tradier_environment(environment)
+        self.base = tradier_api_base(self.environment).rstrip("/")
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -26,21 +33,21 @@ class TradierAdapter:
         }
 
     @staticmethod
-    def authorization_url(state: str) -> str:
+    def authorization_url(state: str, environment: str | None = None) -> str:
         params = urlencode({
             "client_id": settings.tradier_client_id or "",
             "scope": settings.tradier_oauth_scope,
             "state": state,
         })
-        oauth_base = settings.tradier_api_base.replace("/v1", "")
+        oauth_base = tradier_api_base(environment).replace("/v1", "")
         return f"{oauth_base}/v1/oauth/authorize?{params}"
 
     @staticmethod
-    async def exchange_code(code: str) -> dict:
+    async def exchange_code(code: str, environment: str | None = None) -> dict:
         creds = base64.b64encode(
             f"{settings.tradier_client_id}:{settings.tradier_client_secret}".encode()
         ).decode()
-        oauth_base = settings.tradier_api_base.replace("/v1", "")
+        oauth_base = tradier_api_base(environment).replace("/v1", "")
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.post(
                 f"{oauth_base}/v1/oauth/accesstoken",

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.brokers.schwab import SchwabAdapter
 from app.brokers.tradier import TradierAdapter
+from app.brokers.tradier_env import TradierEnvironment, normalize_tradier_environment
 from app.config import settings
 from app.database import get_db
 from app.models.tables import BrokerConnection, User
@@ -24,6 +25,7 @@ class BrokerStatus(BaseModel):
     broker: str
     status: str
     account_id: str | None
+    environment: str | None = None
 
 
 class DefaultBrokerRequest(BaseModel):
@@ -33,12 +35,14 @@ class DefaultBrokerRequest(BaseModel):
 class TradierTokenConnectRequest(BaseModel):
     access_token: str
     account_id: str | None = None
+    environment: TradierEnvironment = "sandbox"
 
 
 class TradierTokenConnectResponse(BaseModel):
     broker: str
     status: str
     account_id: str | None
+    environment: TradierEnvironment
 
 
 class TestOrderRequest(BaseModel):
@@ -56,6 +60,14 @@ class TestOrderResponse(BaseModel):
     message: str
 
 
+def _apply_tradier_trading_prefs(user: User, environment: TradierEnvironment) -> None:
+    if environment == "sandbox":
+        user.default_mode = "paper"
+        return
+    user.default_mode = "live"
+    user.live_trading_enabled = True
+
+
 def _upsert_connection(
     db: Session,
     user: User,
@@ -63,6 +75,7 @@ def _upsert_connection(
     *,
     credentials: str,
     account_id: str | None = None,
+    environment: str | None = None,
 ) -> BrokerConnection:
     conn = db.query(BrokerConnection).filter_by(user_id=user.id, broker=broker).first()
     if conn is None:
@@ -71,6 +84,8 @@ def _upsert_connection(
     conn.encrypted_credentials = encrypt_value(credentials)
     if account_id:
         conn.account_id = account_id
+    if environment is not None:
+        conn.environment = environment
     conn.status = "connected"
     if user.default_broker is None:
         user.default_broker = broker
@@ -82,7 +97,12 @@ def _upsert_connection(
 def list_brokers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.query(BrokerConnection).filter(BrokerConnection.user_id == user.id).all()
     return [
-        BrokerStatus(broker=r.broker, status=r.status, account_id=r.account_id)
+        BrokerStatus(
+            broker=r.broker,
+            status=r.status,
+            account_id=r.account_id,
+            environment=r.environment,
+        )
         for r in rows
     ]
 
@@ -115,13 +135,16 @@ def disconnect_broker(broker: str, user: User = Depends(get_current_user), db: S
 
 
 @router.get("/tradier/authorize")
-def tradier_authorize(user: User = Depends(get_current_user)):
+def tradier_authorize(
+    environment: TradierEnvironment = "sandbox",
+    user: User = Depends(get_current_user),
+):
     if not can_process_trades(user):
         raise HTTPException(status_code=402, detail="Active subscription required")
     if not settings.tradier_client_id or not settings.tradier_client_secret:
         raise HTTPException(status_code=503, detail="Tradier OAuth is not configured on the server")
-    state = create_oauth_state(user.id, "tradier")
-    return {"url": TradierAdapter.authorization_url(state)}
+    state = create_oauth_state(user.id, f"tradier:{environment}")
+    return {"url": TradierAdapter.authorization_url(state, environment)}
 
 
 @router.post("/tradier/token", response_model=TradierTokenConnectResponse)
@@ -130,7 +153,7 @@ async def tradier_connect_token(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Connect using an individual Tradier API access token (personal / sandbox)."""
+    """Connect or switch using an individual Tradier API access token."""
     if not can_process_trades(user):
         raise HTTPException(status_code=402, detail="Active subscription required")
 
@@ -138,45 +161,76 @@ async def tradier_connect_token(
     if not access_token:
         raise HTTPException(status_code=400, detail="access_token is required")
 
-    adapter = TradierAdapter(access_token=access_token)
+    environment = normalize_tradier_environment(body.environment)
+    adapter = TradierAdapter(access_token=access_token, environment=environment)
     account_id = (body.account_id or "").strip() or None
     resolved = await adapter.fetch_primary_account_id()
     if not resolved and not account_id:
         raise HTTPException(
             status_code=400,
-            detail="Tradier token was rejected or has no account — check the token and TRADIER_API_BASE",
+            detail=(
+                "Tradier token was rejected or has no account — "
+                f"confirm it matches the selected {environment} environment"
+            ),
         )
     account_id = account_id or resolved
 
     creds = pack_credentials(access_token)
-    conn = _upsert_connection(db, user, "tradier", credentials=creds, account_id=account_id)
+    _apply_tradier_trading_prefs(user, environment)
+    conn = _upsert_connection(
+        db,
+        user,
+        "tradier",
+        credentials=creds,
+        account_id=account_id,
+        environment=environment,
+    )
     return TradierTokenConnectResponse(
         broker="tradier",
         status=conn.status,
         account_id=conn.account_id,
+        environment=environment,
     )
 
 
 @router.get("/tradier/callback")
 async def tradier_callback(code: str, state: str, db: Session = Depends(get_db)):
-    try:
-        user_id = verify_oauth_state(state, "tradier")
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    environment: TradierEnvironment = normalize_tradier_environment(None)
+    user_id: str | None = None
+    for env in ("sandbox", "live"):
+        try:
+            user_id = verify_oauth_state(state, f"tradier:{env}")
+            environment = env
+            break
+        except ValueError:
+            continue
+    if user_id is None:
+        try:
+            user_id = verify_oauth_state(state, "tradier")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=400, detail="User not found for OAuth state")
 
-    tokens = await TradierAdapter.exchange_code(code)
+    tokens = await TradierAdapter.exchange_code(code, environment)
     access_token = str(tokens.get("access_token", ""))
     if not access_token:
         raise HTTPException(status_code=400, detail="Tradier did not return an access token")
 
-    adapter = TradierAdapter(access_token=access_token)
+    adapter = TradierAdapter(access_token=access_token, environment=environment)
     account_id = await adapter.fetch_primary_account_id()
     creds = pack_credentials(access_token)
-    _upsert_connection(db, user, "tradier", credentials=creds, account_id=account_id)
+    _apply_tradier_trading_prefs(user, environment)
+    _upsert_connection(
+        db,
+        user,
+        "tradier",
+        credentials=creds,
+        account_id=account_id,
+        environment=environment,
+    )
     return RedirectResponse(url=oauth_success_redirect("tradier"))
 
 
