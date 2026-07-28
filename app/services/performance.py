@@ -15,7 +15,10 @@ def list_trades(
     to_dt: datetime | None = None,
     limit: int = 100,
 ) -> list[TradeExecution]:
-    stmt = select(TradeExecution).where(TradeExecution.user_id == user_id)
+    stmt = select(TradeExecution).where(
+        TradeExecution.user_id == user_id,
+        TradeExecution.status != "failed",
+    )
     if mode:
         stmt = stmt.where(TradeExecution.mode == mode)
     if from_dt:
