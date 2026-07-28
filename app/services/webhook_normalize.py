@@ -2,9 +2,27 @@ import json
 from typing import Any
 
 from app.schemas.trade import DiscordWebhookPayload, WebhookPayload
+from app.services.eterminal_signal import is_eterminal_envelope
 
 
 def normalize_webhook_body(body: dict[str, Any]) -> tuple[str, WebhookPayload]:
+    if is_eterminal_envelope(body):
+        signal = body.get("signal") if isinstance(body.get("signal"), dict) else {}
+        signal_id = str(signal.get("id") or "")
+        side = str(signal.get("side") or "")
+        price = signal.get("price")
+        title = f"eterminal {body.get('type', 'event')}"
+        body_text = f"signal_id={signal_id} side={side} price={price}"
+        payload = WebhookPayload(
+            app_id="eterminal",
+            title=title,
+            body=body_text,
+            delivered_date_iso=str(body.get("firedAt") or ""),
+            platform="eterminal",
+        )
+        text = "\n".join(p for p in [title, body_text] if p)
+        return text, payload
+
     if "embeds" in body:
         discord = DiscordWebhookPayload.model_validate(body)
         parts: list[str] = []

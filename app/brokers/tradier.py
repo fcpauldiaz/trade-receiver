@@ -154,6 +154,79 @@ class TradierAdapter:
             order_id = str(body.get("order", {}).get("id", ""))
             return OrderResult(success=True, order_id=order_id, fill_price=contract.ask, raw_response=body)
 
+    async def place_order_with_take_profit(
+        self,
+        contract: OptionContract,
+        quantity: int,
+        side: str,
+        mode: str,
+        *,
+        take_profit_price: Decimal,
+    ) -> OrderResult:
+        """Market BTO, then STC limit take-profit (Tradier OTO parent cannot be market)."""
+        if not self.account_id:
+            return OrderResult(
+                success=False,
+                order_id=None,
+                fill_price=None,
+                raw_response={},
+                error="Tradier account id missing on connection",
+            )
+        tp = take_profit_price.quantize(Decimal("0.01"))
+        if mode == "paper" and "sandbox" not in self.base:
+            return OrderResult(
+                success=True,
+                order_id=f"paper-mkt-tp-{contract.symbol}",
+                fill_price=contract.ask,
+                raw_response={
+                    "simulated": True,
+                    "mode": "paper",
+                    "entry": "market",
+                    "take_profit_price": float(tp),
+                },
+            )
+        if side != "buy_to_open":
+            return await self.place_order(contract, quantity, side, mode)
+
+        entry = await self.place_order(contract, quantity, side, mode)
+        if not entry.success:
+            return entry
+
+        tp_data = {
+            "class": "option",
+            "symbol": contract.underlying,
+            "option_symbol": contract.symbol,
+            "side": "sell_to_close",
+            "quantity": str(quantity),
+            "type": "limit",
+            "price": str(tp),
+            "duration": "gtc",
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                f"{self.base}/accounts/{self.account_id}/orders",
+                headers=self._headers(),
+                data=tp_data,
+            )
+            tp_body = resp.json() if resp.content else {}
+            tp_ok = resp.status_code < 400
+            tp_order_id = str((tp_body.get("order") or {}).get("id", "")) if tp_ok else None
+
+        return OrderResult(
+            success=True,
+            order_id=entry.order_id,
+            fill_price=entry.fill_price,
+            raw_response={
+                **(entry.raw_response or {}),
+                "entry": "market",
+                "take_profit_price": float(tp),
+                "take_profit_order_id": tp_order_id,
+                "take_profit_ok": tp_ok,
+                "take_profit_response": tp_body,
+            },
+            error=None if tp_ok else f"entry filled but take-profit failed: {tp_body}",
+        )
+
     async def get_account_equity(self) -> Decimal | None:
         if not self.account_id:
             return None

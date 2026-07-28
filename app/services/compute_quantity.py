@@ -5,8 +5,17 @@ from app.brokers.base import BrokerAdapter
 from app.models.tables import User
 from app.schemas.trade import ValidatedTrade
 
+
 def _cap_quantity(quantity: int, max_contracts: int) -> int:
     return max(1, min(quantity, max_contracts))
+
+
+def quantity_for_notional(ask: Decimal, notional_usd: Decimal, max_contracts: int) -> int:
+    cost_per_contract = ask * Decimal("100")
+    if cost_per_contract <= 0:
+        return 1
+    raw_qty = int(math.floor(float(notional_usd / cost_per_contract)))
+    return _cap_quantity(max(1, raw_qty), max_contracts)
 
 
 async def compute_quantity(
@@ -14,6 +23,12 @@ async def compute_quantity(
     validated: ValidatedTrade,
     adapter: BrokerAdapter,
 ) -> tuple[int, str | None]:
+    if validated.notional_usd is not None and validated.notional_usd > 0:
+        price = validated.ask or validated.limit_price
+        if price is None or price <= 0:
+            return 0, "missing option price for notional sizing"
+        return quantity_for_notional(price, validated.notional_usd, user.max_contracts), None
+
     mode = user.sizing_mode or "alert_inferred"
 
     if mode == "fixed":
@@ -39,5 +54,11 @@ async def compute_quantity(
         raw_qty = int(math.floor(float(risk_dollars / cost_per_contract)))
         quantity = _cap_quantity(max(1, raw_qty), user.max_contracts)
         return quantity, None
+
+    if mode == "dollar_notional":
+        price = validated.ask or validated.limit_price
+        if price is None or price <= 0:
+            return 0, "missing option price for dollar notional sizing"
+        return quantity_for_notional(price, Decimal("1000"), user.max_contracts), None
 
     return _cap_quantity(max(1, validated.quantity), user.max_contracts), None

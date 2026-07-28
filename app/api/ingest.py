@@ -10,6 +10,11 @@ from app.database import get_db
 from app.models.tables import BrokerConnection, InboundAlert, User
 from app.services.compute_quantity import compute_quantity
 from app.services.entitlements import can_process_trades, require_active_subscription
+from app.services.eterminal_signal import (
+    eterminal_idempotency_key,
+    is_eterminal_envelope,
+    map_eterminal_signal,
+)
 from app.services.execute_trade import execute_trade
 from app.services.option_chain import get_adapter
 from app.services.validate_trade import validate_trade
@@ -30,7 +35,11 @@ def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | No
 
 async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
     text, payload = normalize_webhook_body(body)
-    key = idempotency_key(user.id, payload)
+    if is_eterminal_envelope(body):
+        key = eterminal_idempotency_key(user.id, body)
+    else:
+        key = idempotency_key(user.id, payload)
+
     existing = db.query(InboundAlert).filter_by(user_id=user.id, idempotency_key=key).first()
     if existing:
         return {"status": "duplicate", "alert_id": existing.id}
@@ -54,8 +63,22 @@ async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
         db.commit()
         raise HTTPException(status_code=402, detail=reason)
 
-    intent = await parse_alert(text)
-    intent = decide_action(intent, user)
+    if is_eterminal_envelope(body):
+        intent = map_eterminal_signal(body)
+        if intent is None:
+            alert.skip_reason = "eterminal event not a tradable signal"
+            alert.processed = True
+            db.commit()
+            return {"status": "skipped", "reason": alert.skip_reason}
+    else:
+        intent = await parse_alert(text)
+        intent = decide_action(intent, user)
+        if intent.action == "skip":
+            alert.skip_reason = intent.rationale or "skipped"
+            alert.processed = True
+            db.commit()
+            return {"status": "skipped", "reason": alert.skip_reason}
+
     if intent.action == "skip":
         alert.skip_reason = intent.rationale or "skipped"
         alert.processed = True
@@ -77,7 +100,7 @@ async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
         alert.skip_reason = sizing_skip
         alert.processed = True
         db.commit()
-        return {"status": "skipped", "reason": alert.skip_reason}
+        return {"status": "skipped", "reason": sizing_skip}
 
     validated = validated.model_copy(update={"quantity": quantity})
     execution = await execute_trade(db, user, alert, validated, adapter)

@@ -37,6 +37,9 @@ class TradeIntent(BaseModel):
     limit_price: Decimal | None = None
     confidence: float = 0.0
     rationale: str = ""
+    take_profit_pct: Decimal | None = None
+    source: str = ""
+    notional_usd: Decimal | None = None
 
 
 class ValidatedTrade(BaseModel):
@@ -56,3 +59,6 @@ class ValidatedTrade(BaseModel):
     ask: Decimal | None = None
     open_interest: int | None = None
     validation_errors: list[str] = Field(default_factory=list)
+    take_profit_pct: Decimal | None = None
+    source: str = ""
+    notional_usd: Decimal | None = None

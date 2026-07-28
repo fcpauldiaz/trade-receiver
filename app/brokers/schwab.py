@@ -231,6 +231,61 @@ class SchwabAdapter:
         }
         return await self._place_live_order(order_body)
 
+    async def place_order_with_take_profit(
+        self,
+        contract: OptionContract,
+        quantity: int,
+        side: str,
+        mode: str,
+        *,
+        take_profit_price: Decimal,
+    ) -> OrderResult:
+        tp = float(take_profit_price)
+        if mode == "paper":
+            return OrderResult(
+                success=True,
+                order_id=f"paper-schwab-oto-{contract.symbol}",
+                fill_price=contract.ask,
+                raw_response={
+                    "simulated": True,
+                    "take_profit_price": tp,
+                    "orderStrategyType": "TRIGGER",
+                },
+            )
+        if side != "buy_to_open":
+            return await self.place_order(contract, quantity, side, mode)
+
+        order_body = {
+            "orderStrategyType": "TRIGGER",
+            "session": "NORMAL",
+            "duration": "DAY",
+            "orderType": "MARKET",
+            "orderLegCollection": [{
+                "instruction": "BUY_TO_OPEN",
+                "quantity": quantity,
+                "instrument": {"symbol": contract.symbol, "assetType": "OPTION"},
+            }],
+            "childOrderStrategies": [{
+                "orderStrategyType": "SINGLE",
+                "session": "NORMAL",
+                "duration": "GOOD_TILL_CANCEL",
+                "orderType": "LIMIT",
+                "price": tp,
+                "orderLegCollection": [{
+                    "instruction": "SELL_TO_CLOSE",
+                    "quantity": quantity,
+                    "instrument": {"symbol": contract.symbol, "assetType": "OPTION"},
+                }],
+            }],
+        }
+        result = await self._place_live_order(order_body)
+        result.raw_response = {
+            **result.raw_response,
+            "take_profit_price": tp,
+            "orderStrategyType": "TRIGGER",
+        }
+        return result
+
     async def place_equity_order(self, symbol: str, quantity: int, side: str, mode: str) -> OrderResult:
         if mode == "paper":
             return OrderResult(

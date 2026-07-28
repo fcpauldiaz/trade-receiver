@@ -22,6 +22,23 @@ class WebullAdapter:
     async def place_order(self, contract: OptionContract, quantity: int, side: str, mode: str) -> OrderResult:
         return OrderResult(success=False, order_id=None, fill_price=None, raw_response={}, error="Webull not enabled")
 
+    async def place_order_with_take_profit(
+        self,
+        contract: OptionContract,
+        quantity: int,
+        side: str,
+        mode: str,
+        *,
+        take_profit_price: Decimal,
+    ) -> OrderResult:
+        return OrderResult(
+            success=False,
+            order_id=None,
+            fill_price=None,
+            raw_response={"take_profit_price": float(take_profit_price)},
+            error="Webull take-profit orders are not supported",
+        )
+
     async def get_account_equity(self) -> Decimal | None:
         if not settings.webull_enabled:
             return None

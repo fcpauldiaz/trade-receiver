@@ -41,6 +41,16 @@ class BrokerAdapter(Protocol):
         self, contract: OptionContract, quantity: int, side: str, mode: TradeMode
     ) -> OrderResult: ...
 
+    async def place_order_with_take_profit(
+        self,
+        contract: OptionContract,
+        quantity: int,
+        side: str,
+        mode: TradeMode,
+        *,
+        take_profit_price: Decimal,
+    ) -> OrderResult: ...
+
     async def get_account_equity(self) -> Decimal | None: ...
 
     async def place_equity_order(

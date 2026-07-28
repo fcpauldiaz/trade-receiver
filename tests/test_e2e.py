@@ -19,8 +19,36 @@ from app.models.tables import BrokerConnection, Subscription, User
 class FakeAdapter:
     name = "tradier"
 
+    def __init__(self) -> None:
+        self.last_tp_price: Decimal | None = None
+
     async def get_option_chain(self, underlying: str, expiration: date | None = None) -> list[OptionContract]:
         exp = expiration or date(2026, 6, 20)
+        u = underlying.upper()
+        if u in {"SPX", "SPXW"}:
+            strike = Decimal("6325")
+            return [
+                OptionContract(
+                    symbol=f"SPXW{exp.strftime('%y%m%d')}C06325000",
+                    underlying="SPXW",
+                    option_type="call",
+                    strike=strike,
+                    expiration=exp,
+                    bid=Decimal("4.80"),
+                    ask=Decimal("5.00"),
+                    open_interest=500,
+                ),
+                OptionContract(
+                    symbol=f"SPXW{exp.strftime('%y%m%d')}P06325000",
+                    underlying="SPXW",
+                    option_type="put",
+                    strike=strike,
+                    expiration=exp,
+                    bid=Decimal("4.80"),
+                    ask=Decimal("5.00"),
+                    open_interest=500,
+                ),
+            ]
         return [
             OptionContract(
                 symbol="SPY260620C00580000",
@@ -43,6 +71,28 @@ class FakeAdapter:
             order_id="paper-test-1",
             fill_price=contract.ask,
             raw_response={"simulated": True, "mode": mode},
+        )
+
+    async def place_order_with_take_profit(
+        self,
+        contract: OptionContract,
+        quantity: int,
+        side: str,
+        mode: str,
+        *,
+        take_profit_price: Decimal,
+    ) -> OrderResult:
+        self.last_tp_price = take_profit_price
+        return OrderResult(
+            success=True,
+            order_id="paper-oto-1",
+            fill_price=contract.ask,
+            raw_response={
+                "simulated": True,
+                "mode": mode,
+                "take_profit_price": float(take_profit_price),
+                "class": "oto",
+            },
         )
 
     async def get_positions(self):
@@ -102,6 +152,7 @@ def _seed_paid_user(db: Session) -> tuple[User, str]:
     user = User(
         email="paid@example.com",
         api_key_hash=hashlib.sha256(token.encode()).hexdigest(),
+        max_contracts=10,
     )
     db.add(user)
     db.flush()
@@ -147,6 +198,74 @@ def test_ingest_e2e_paper_order(client: TestClient, db_session: Session):
     assert data["status"] in ("filled", "validation_failed")
     if data["status"] == "filled":
         assert data["trade_id"]
+
+
+def test_ingest_eterminal_signal_places_oto(client: TestClient, db_session: Session):
+    user, token = _seed_paid_user(db_session)
+    resp = client.post(
+        "/v1/ingest",
+        json={
+            "type": "signal",
+            "firedAt": "2026-07-21T15:00:00.000Z",
+            "session": "rth",
+            "caution": None,
+            "signal": {
+                "id": "eterminal-sig-1",
+                "time": 1721596500,
+                "price": 6325,
+                "shape": "triangle",
+                "side": "long",
+                "variant": "filled",
+                "color": "green",
+                "source": "spx3",
+            },
+            "context": {"currentPrice": 6325},
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "filled"
+    assert data["trade_id"]
+
+    dup = client.post(
+        "/v1/ingest",
+        json={
+            "type": "signal",
+            "firedAt": "2026-07-21T15:00:00.000Z",
+            "session": "rth",
+            "caution": None,
+            "signal": {
+                "id": "eterminal-sig-1",
+                "time": 1721596500,
+                "price": 6325,
+                "shape": "triangle",
+                "side": "long",
+                "variant": "filled",
+                "color": "green",
+                "source": "spx3",
+            },
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert dup.status_code == 200
+    assert dup.json()["status"] == "duplicate"
+
+
+def test_ingest_eterminal_test_is_skipped(client: TestClient, db_session: Session):
+    _, token = _seed_paid_user(db_session)
+    resp = client.post(
+        "/v1/ingest",
+        json={
+            "type": "test",
+            "firedAt": "2026-07-21T15:00:00.000Z",
+            "session": "rth",
+            "caution": None,
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "skipped"
 
 
 def test_ingest_rejects_inactive_subscription(client: TestClient, db_session: Session):

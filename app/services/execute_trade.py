@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
@@ -7,6 +8,16 @@ from app.models.tables import InboundAlert, TradeExecution, User
 from app.schemas.trade import ValidatedTrade
 from app.services.order_lifecycle import compute_close_pnl, resolve_fill
 from app.services.position_check import validate_close_position
+
+
+def _take_profit_price(validated: ValidatedTrade) -> Decimal | None:
+    if validated.take_profit_pct is None or validated.take_profit_pct <= 0:
+        return None
+    entry = validated.ask or validated.limit_price or validated.bid
+    if entry is None or entry <= 0:
+        return None
+    tp = entry * (Decimal("1") + validated.take_profit_pct)
+    return tp.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 async def execute_trade(
@@ -76,7 +87,18 @@ async def execute_trade(
             db.commit()
             return execution
 
-    result = await adapter.place_order(contract, validated.quantity, side, mode)
+    tp_price = _take_profit_price(validated) if validated.action == "buy_to_open" else None
+    if tp_price is not None:
+        result = await adapter.place_order_with_take_profit(
+            contract,
+            validated.quantity,
+            side,
+            mode,
+            take_profit_price=tp_price,
+        )
+    else:
+        result = await adapter.place_order(contract, validated.quantity, side, mode)
+
     status, fill_price = await resolve_fill(adapter, result.order_id, validated.ask)
     if not result.success:
         status = "failed"
@@ -84,6 +106,12 @@ async def execute_trade(
     pnl = None
     if status == "filled" and validated.action == "sell_to_close":
         pnl = compute_close_pnl(db, user.id, validated.contract_symbol, validated.quantity, fill_price)
+
+    broker_payload = dict(result.raw_response or {})
+    if tp_price is not None:
+        broker_payload.setdefault("take_profit_price", float(tp_price))
+        if validated.take_profit_pct is not None:
+            broker_payload.setdefault("take_profit_pct", float(validated.take_profit_pct))
 
     execution = TradeExecution(
         user_id=user.id,
@@ -101,7 +129,7 @@ async def execute_trade(
         pnl=pnl,
         broker_order_id=result.order_id,
         intent_json=validated.model_dump_json(),
-        broker_response_json=json.dumps(result.raw_response),
+        broker_response_json=json.dumps(broker_payload),
     )
     db.add(execution)
     alert.processed = True

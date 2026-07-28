@@ -41,5 +41,8 @@ class Settings(BaseSettings):
 
     webull_enabled: bool = False
 
+    eterminal_notional_usd: float = 1000.0
+    eterminal_take_profit_pct: float = 0.30
+
 
 settings = Settings()
