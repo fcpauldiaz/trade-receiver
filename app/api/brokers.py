@@ -30,6 +30,17 @@ class DefaultBrokerRequest(BaseModel):
     broker: str
 
 
+class TradierTokenConnectRequest(BaseModel):
+    access_token: str
+    account_id: str | None = None
+
+
+class TradierTokenConnectResponse(BaseModel):
+    broker: str
+    status: str
+    account_id: str | None
+
+
 class TestOrderRequest(BaseModel):
     symbol: str = "SPY"
     quantity: int = 1
@@ -111,6 +122,39 @@ def tradier_authorize(user: User = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="Tradier OAuth is not configured on the server")
     state = create_oauth_state(user.id, "tradier")
     return {"url": TradierAdapter.authorization_url(state)}
+
+
+@router.post("/tradier/token", response_model=TradierTokenConnectResponse)
+async def tradier_connect_token(
+    body: TradierTokenConnectRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Connect using an individual Tradier API access token (personal / sandbox)."""
+    if not can_process_trades(user):
+        raise HTTPException(status_code=402, detail="Active subscription required")
+
+    access_token = body.access_token.strip()
+    if not access_token:
+        raise HTTPException(status_code=400, detail="access_token is required")
+
+    adapter = TradierAdapter(access_token=access_token)
+    account_id = (body.account_id or "").strip() or None
+    resolved = await adapter.fetch_primary_account_id()
+    if not resolved and not account_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Tradier token was rejected or has no account — check the token and TRADIER_API_BASE",
+        )
+    account_id = account_id or resolved
+
+    creds = pack_credentials(access_token)
+    conn = _upsert_connection(db, user, "tradier", credentials=creds, account_id=account_id)
+    return TradierTokenConnectResponse(
+        broker="tradier",
+        status=conn.status,
+        account_id=conn.account_id,
+    )
 
 
 @router.get("/tradier/callback")
