@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from app.models.tables import TradeExecution
-from app.services.performance import daily_pnl, performance_summary, trade_cashflow
+from app.services.performance import performance_summary, trade_cashflow
 
 
 def _trade(**kwargs) -> TradeExecution:
@@ -25,9 +25,9 @@ def _trade(**kwargs) -> TradeExecution:
     return TradeExecution(**defaults)
 
 
-def test_trade_cashflow_open_premium():
+def test_trade_cashflow_open_has_no_realized_pnl():
     row = _trade(fill_price=14.0, quantity=1, pnl=None)
-    assert trade_cashflow(row) == -1400.0
+    assert trade_cashflow(row) is None
 
 
 def test_trade_cashflow_uses_realized_pnl():
@@ -36,11 +36,11 @@ def test_trade_cashflow_uses_realized_pnl():
 
 
 def test_trade_cashflow_ignores_non_filled():
-    row = _trade(status="failed", fill_price=1.15, quantity=8)
+    row = _trade(status="submitted", fill_price=18.2, quantity=1, pnl=None)
     assert trade_cashflow(row) is None
 
 
-def test_performance_summary_counts_open_premium(monkeypatch):
+def test_performance_summary_open_not_counted_as_loss():
     rows = [
         _trade(id="a", fill_price=14.0, quantity=1, pnl=None),
     ]
@@ -58,6 +58,6 @@ def test_performance_summary_counts_open_premium(monkeypatch):
 
     summary = performance_summary(FakeSession(), "u1")  # type: ignore[arg-type]
     assert summary["total_trades"] == 1
-    assert summary["total_pnl"] == -1400.0
-    assert summary["mtd_pnl"] == -1400.0
+    assert summary["total_pnl"] == 0.0
+    assert summary["mtd_pnl"] == 0.0
     assert summary["win_rate"] == 0.0

@@ -30,21 +30,12 @@ def list_trades(
 
 
 def trade_cashflow(row: TradeExecution) -> float | None:
-    """Dashboard cash impact for a filled trade.
-
-    Prefer stored realized pnl (closes). For open fills with no pnl yet, use
-    premium paid as a negative cashflow so calendars/KPIs are not blank zeros.
-    """
+    """Realized P&L only — open premium is not a loss while a position (or TP) is working."""
     if row.status != "filled":
         return None
-    if row.pnl is not None:
-        return float(row.pnl)
-    if row.fill_price is None or row.quantity <= 0:
+    if row.pnl is None:
         return None
-    intent = row.intent_json or ""
-    if "sell_to_close" in intent:
-        return 0.0
-    return round(-float(row.fill_price) * row.quantity * 100, 2)
+    return float(row.pnl)
 
 
 def daily_pnl(db: Session, user_id: str, month: str) -> dict[str, float]:
@@ -83,8 +74,7 @@ def performance_summary(db: Session, user_id: str) -> dict:
             )
         )
     )
-    cashflows = [trade_cashflow(r) for r in rows]
-    cashflows = [c for c in cashflows if c is not None]
+    cashflows = [c for c in (trade_cashflow(r) for r in rows) if c is not None]
     total_pnl = round(sum(cashflows), 2)
 
     realized = [r for r in rows if r.pnl is not None]

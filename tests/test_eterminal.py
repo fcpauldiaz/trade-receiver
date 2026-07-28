@@ -250,7 +250,11 @@ async def test_execute_trade_calls_oto(monkeypatch):
                 success=True,
                 order_id="oto-1",
                 fill_price=Decimal("5.00"),
-                raw_response={"take_profit_price": float(take_profit_price)},
+                raw_response={
+                    "take_profit_price": float(take_profit_price),
+                    "take_profit_order_id": "oto-tp-1",
+                    "take_profit_ok": True,
+                },
             )
 
         async def get_order_status(self, order_id: str):
@@ -291,8 +295,12 @@ async def test_execute_trade_calls_oto(monkeypatch):
     db = MagicMock()
     db.add = MagicMock()
     db.commit = MagicMock()
+    db.flush = MagicMock()
     db.refresh = MagicMock()
+    db.query.return_value.filter_by.return_value.first.return_value = None
 
     execution = await execute_trade(db, user, alert, validated, adapter)
     assert adapter.called_tp == Decimal("6.50")
     assert "take_profit_price" in execution.broker_response_json
+    # Entry + take-profit leg
+    assert db.add.call_count >= 2

@@ -20,6 +20,78 @@ def _take_profit_price(validated: ValidatedTrade) -> Decimal | None:
     return tp.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
+def _take_profit_close_intent(validated: ValidatedTrade, tp_price: Decimal) -> str:
+    close = validated.model_copy(
+        update={
+            "action": "sell_to_close",
+            "order_type": "limit",
+            "limit_price": tp_price,
+            "take_profit_pct": None,
+            "rationale": f"take-profit exit · {validated.rationale}".strip(" ·"),
+        }
+    )
+    return close.model_dump_json()
+
+
+def _persist_take_profit_leg(
+    db: Session,
+    *,
+    user: User,
+    alert: InboundAlert,
+    validated: ValidatedTrade,
+    mode: str,
+    entry: TradeExecution,
+    tp_price: Decimal,
+    broker_payload: dict,
+) -> TradeExecution | None:
+    """Record the resting STC take-profit so both broker legs exist in the DB."""
+    tp_order_id = broker_payload.get("take_profit_order_id")
+    if not tp_order_id and entry.broker_order_id:
+        tp_order_id = f"tp-{entry.broker_order_id}"
+    if not tp_order_id:
+        return None
+
+    existing = (
+        db.query(TradeExecution)
+        .filter_by(user_id=user.id, broker_order_id=str(tp_order_id))
+        .first()
+    )
+    if existing:
+        return existing
+
+    tp_ok = broker_payload.get("take_profit_ok", True)
+    tp_status = "submitted" if tp_ok else "failed"
+    tp_row = TradeExecution(
+        user_id=user.id,
+        alert_id=alert.id,
+        broker=validated.broker,
+        mode=mode,
+        status=tp_status,
+        underlying=validated.underlying,
+        option_type=validated.option_type,
+        strike=float(validated.strike),
+        expiration=validated.expiration.isoformat(),
+        quantity=validated.quantity,
+        contract_symbol=validated.contract_symbol,
+        fill_price=float(tp_price),
+        pnl=None,
+        broker_order_id=str(tp_order_id),
+        intent_json=_take_profit_close_intent(validated, tp_price),
+        broker_response_json=json.dumps(
+            {
+                "role": "take_profit",
+                "parent_order_id": entry.broker_order_id,
+                "parent_execution_id": entry.id,
+                "take_profit_price": float(tp_price),
+                "take_profit_ok": tp_ok,
+                "take_profit_response": broker_payload.get("take_profit_response"),
+            }
+        ),
+    )
+    db.add(tp_row)
+    return tp_row
+
+
 async def execute_trade(
     db: Session,
     user: User,
@@ -132,6 +204,20 @@ async def execute_trade(
         broker_response_json=json.dumps(broker_payload),
     )
     db.add(execution)
+    db.flush()
+
+    if tp_price is not None and status in {"filled", "submitted"} and result.success:
+        _persist_take_profit_leg(
+            db,
+            user=user,
+            alert=alert,
+            validated=validated,
+            mode=mode,
+            entry=execution,
+            tp_price=tp_price,
+            broker_payload=broker_payload,
+        )
+
     alert.processed = True
     db.commit()
     db.refresh(execution)
