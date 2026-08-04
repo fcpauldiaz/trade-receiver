@@ -14,6 +14,7 @@ from app.database import get_db
 from app.models.tables import BrokerConnection, User
 from app.services.broker_credentials import pack_credentials
 from app.services.crypto import encrypt_value
+from app.services import market_hours
 from app.services.entitlements import can_process_trades
 from app.services.oauth_state import create_oauth_state, oauth_success_redirect, verify_oauth_state
 from app.services.option_chain import get_adapter
@@ -297,6 +298,9 @@ async def test_broker_order(
     mode = user.default_mode
     if mode == "live" and not user.live_trading_enabled:
         raise HTTPException(status_code=400, detail="Live trading is not enabled")
+
+    if not market_hours.is_rth():
+        raise HTTPException(status_code=400, detail=market_hours.RTH_SKIP_REASON)
 
     adapter = await get_adapter(db, conn)
     result = await adapter.place_equity_order(body.symbol.upper(), body.quantity, body.side, mode)

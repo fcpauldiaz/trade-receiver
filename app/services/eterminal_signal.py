@@ -7,12 +7,10 @@ import json
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.schemas.trade import TradeIntent
-
-ET = ZoneInfo("America/New_York")
+from app.services.market_hours import ET
 
 
 def is_eterminal_envelope(body: dict[str, Any]) -> bool:

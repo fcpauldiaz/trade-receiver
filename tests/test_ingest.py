@@ -36,6 +36,7 @@ def db_session(monkeypatch):
         return FakeAdapter()
 
     monkeypatch.setattr("app.api.ingest.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
     db = SessionLocal()
     yield db
     db.close()
@@ -93,3 +94,22 @@ def test_ingest_inactive_subscription(ingest_client, db_session: Session):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert res.status_code == 402
+
+
+def test_ingest_skips_outside_rth(ingest_client, db_session: Session, monkeypatch):
+    user, _ = _seed_paid_user(db_session)
+    token = "test-api-key"
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json={"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "skipped"
+    assert "regular trading hours" in data["reason"]

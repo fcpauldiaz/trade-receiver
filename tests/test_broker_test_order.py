@@ -27,7 +27,7 @@ class FakeBrokerAdapter:
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -50,6 +50,9 @@ def client():
         return FakeBrokerAdapter()
 
     brokers_api.get_adapter = _fake_adapter
+    import app.services.market_hours as market_hours
+
+    monkeypatch.setattr(market_hours, "is_rth", lambda now=None: True)
     yield TestClient(app), SessionLocal
     app.dependency_overrides.clear()
 
@@ -139,3 +142,30 @@ def test_test_order_live_blocked_without_flag(client):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
+
+
+def test_test_order_blocked_outside_rth(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    db.add(
+        BrokerConnection(
+            user_id=user.id,
+            broker="tradier",
+            status="connected",
+            account_id="VA123",
+            encrypted_credentials=encrypt_value("fake-token"),
+        )
+    )
+    db.commit()
+    db.close()
+
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    resp = test_client.post(
+        "/v1/me/brokers/tradier/test-order",
+        json={"symbol": "SPY", "quantity": 1, "side": "buy"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+    assert "regular trading hours" in resp.json()["detail"]

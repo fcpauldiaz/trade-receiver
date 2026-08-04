@@ -136,6 +136,7 @@ def db_session(monkeypatch):
         return FakeAdapter()
 
     monkeypatch.setattr("app.api.ingest.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
     db = SessionLocal()
     yield db
     db.close()

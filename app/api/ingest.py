@@ -15,6 +15,7 @@ from app.services.eterminal_signal import (
     is_eterminal_envelope,
     map_eterminal_signal,
 )
+from app.services import market_hours
 from app.services.execute_trade import execute_trade
 from app.services.option_chain import get_adapter
 from app.services.validate_trade import validate_trade
@@ -81,6 +82,12 @@ async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
 
     if intent.action == "skip":
         alert.skip_reason = intent.rationale or "skipped"
+        alert.processed = True
+        db.commit()
+        return {"status": "skipped", "reason": alert.skip_reason}
+
+    if not market_hours.is_rth():
+        alert.skip_reason = market_hours.RTH_SKIP_REASON
         alert.processed = True
         db.commit()
         return {"status": "skipped", "reason": alert.skip_reason}
