@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.models.tables import Subscription, User
+from app.services.entitlements import can_process_trades
 from app.services.jwt_auth import generate_api_key, hash_api_key
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
@@ -84,6 +85,8 @@ def issue_device_token(body: DeviceTokenRequest, db: Session = Depends(get_db)):
     user = _resolve_user(db, body.auth_id, body.email)
     if user is None:
         raise HTTPException(status_code=404, detail="User not provisioned")
+    if not can_process_trades(user):
+        raise HTTPException(status_code=402, detail="Active subscription required")
     api_key = generate_api_key()
     user.api_key_hash = hash_api_key(api_key)
     db.commit()

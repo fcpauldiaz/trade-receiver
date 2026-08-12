@@ -127,3 +127,21 @@ def test_device_token_issues_api_key(client):
     assert body["api_key"]
     assert body["ingest_url"].endswith("/v1/ingest")
 
+
+def test_device_token_requires_active_subscription(client):
+    http, db_factory = client
+    db = db_factory()
+    user = User(email="free@example.com", better_auth_id="auth-free")
+    db.add(user)
+    db.flush()
+    db.add(Subscription(user_id=user.id, status="none", plan_name="free"))
+    db.commit()
+    db.close()
+
+    res = http.post(
+        "/v1/internal/device-token",
+        json={"auth_id": "auth-free", "email": "free@example.com"},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    assert res.status_code == 402
+
