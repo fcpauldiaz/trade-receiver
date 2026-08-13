@@ -25,6 +25,8 @@ Use the repo **Dockerfile** — do not use Nixpacks.
 
 | Setting | Value |
 |---------|--------|
+| Service name | **Trade Receiver** |
+| Repository | `fcpauldiaz/trade-receiver` |
 | Build Pack | **Dockerfile** |
 | Dockerfile location | `/Dockerfile` |
 | Port | `8000` |
@@ -52,7 +54,7 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | libSQL/SQLite connection (shared with trade-platform auth tables) |
+| `DATABASE_URL` | libSQL/SQLite connection (shared with Trade Desky auth tables) |
 | `API_SECRET_KEY` | Signs OAuth state tokens |
 | `ENCRYPTION_KEY` | Encrypts per-user broker tokens at rest |
 | `RECEIVER_BASE_URL` | Public API URL (ingest + OAuth callbacks) |
@@ -78,7 +80,7 @@ Per-user access tokens and account IDs are stored encrypted in `broker_connectio
 | Variable | Purpose |
 |----------|---------|
 | `OPENAI_API_KEY` | LLM alert parsing (falls back to rules if unset) |
-| `TURSO_AUTH_TOKEN` | Remote libSQL auth (same value on trade-platform) |
+| `TURSO_AUTH_TOKEN` | Remote libSQL auth (same value on Trade Desky) |
 | `WEBULL_ENABLED` | Feature flag for Webull adapter |
 
 ## Broker connect flow
@@ -86,7 +88,7 @@ Per-user access tokens and account IDs are stored encrypted in `broker_connectio
 ```mermaid
 sequenceDiagram
     participant User
-    participant Platform as trade-platform
+    participant Platform as Trade Desky
     participant Receiver as trade-receiver
     participant Broker
 
@@ -148,5 +150,5 @@ DATABASE_URL=sqlite:///./data/test.db pytest
 
 ## Related repos
 
-- [discord-trader](https://github.com/fcpauldiaz/discord-trader) — TanStack Start UI
+- [trade-desky](https://github.com/fcpauldiaz/trade-desky) — TanStack Start UI (marketing + logged-in app)
 - [notification-watcher](https://github.com/fcpauldiaz/discord-data-scraper) — macOS/Windows desktop alert forwarder
