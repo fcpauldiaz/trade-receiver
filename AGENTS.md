@@ -20,7 +20,7 @@
   (SQLite at `sqlite:///./data/trade.db`, `INTERNAL_API_SECRET=dev-internal-secret`).
   The `data/` dir is auto-created; SQLite DB files are gitignored.
 - Alembic migrations run automatically on app startup (`upgrade head`); there is
-  no manual migration step for local dev. Current head is `009`.
+  no manual migration step for local dev. Current head is `010`.
 - `GET /health` returns DB status and the current migration head — use it as a
   readiness check.
 

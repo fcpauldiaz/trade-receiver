@@ -40,7 +40,7 @@ def _verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Intern
 
 def _resolve_user(db: Session, auth_id: str | None, email: str | None) -> User | None:
     if auth_id:
-        user = db.query(User).filter(User.better_auth_id == auth_id).first()
+        user = db.get(User, auth_id)
         if user:
             return user
     if email:
@@ -48,26 +48,33 @@ def _resolve_user(db: Session, auth_id: str | None, email: str | None) -> User |
     return None
 
 
+def _ensure_subscription(db: Session, user: User) -> None:
+    if user.subscription is None:
+        db.add(Subscription(user_id=user.id, status="none", plan_name="free"))
+
+
 @router.post("/provision", response_model=ProvisionResponse, dependencies=[Depends(_verify_internal_secret)])
 def provision_user(body: ProvisionRequest, db: Session = Depends(get_db)):
-    by_auth = db.query(User).filter(User.better_auth_id == body.auth_id).first()
-    if by_auth:
-        return ProvisionResponse(user_id=by_auth.id, created=False, linked=False)
+    by_id = db.get(User, body.auth_id)
+    if by_id:
+        _ensure_subscription(db, by_id)
+        if body.name and not by_id.name:
+            by_id.name = body.name
+        db.commit()
+        return ProvisionResponse(user_id=by_id.id, created=False, linked=False)
 
     by_email = db.query(User).filter(User.email == body.email).first()
     if by_email:
-        if by_email.better_auth_id and by_email.better_auth_id != body.auth_id:
-            raise HTTPException(status_code=409, detail="Email linked to another auth account")
-        by_email.better_auth_id = body.auth_id
+        _ensure_subscription(db, by_email)
         if body.name and not by_email.name:
             by_email.name = body.name
         db.commit()
         return ProvisionResponse(user_id=by_email.id, created=False, linked=True)
 
     user = User(
+        id=body.auth_id,
         email=body.email,
         name=body.name,
-        better_auth_id=body.auth_id,
         api_key_hash=hash_api_key(generate_api_key()),
     )
     db.add(user)

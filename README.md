@@ -61,7 +61,7 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 | `PLATFORM_BASE_URL` | Where OAuth redirects after connect (e.g. `http://localhost:3000`) |
 | `LEMON_SQUEEZY_WEBHOOK_SECRET` | Subscription webhook verification |
 | `BETTER_AUTH_URL` | Public platform URL — JWT issuer/JWKS for API auth |
-| `INTERNAL_API_SECRET` | Shared secret for user provisioning from platform signup |
+| `INTERNAL_API_SECRET` | Shared secret so signup can ensure a `subscriptions` row for the same `users` id |
 
 ### OAuth app registration (your developer apps — not user accounts)
 

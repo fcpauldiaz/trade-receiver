@@ -17,7 +17,8 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    better_auth_id: Mapped[str | None] = mapped_column(String(36), unique=True, index=True, nullable=True)
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    image: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_key_hash: Mapped[str | None] = mapped_column(String(128), nullable=True)
     default_mode: Mapped[str] = mapped_column(String(16), default="paper")
     max_contracts: Mapped[int] = mapped_column(Integer, default=1)
@@ -29,6 +30,7 @@ class User(Base):
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     default_broker: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
     broker_connections: Mapped[list["BrokerConnection"]] = relationship(back_populates="user")

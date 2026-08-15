@@ -42,6 +42,25 @@ def client(monkeypatch):
     app.dependency_overrides.clear()
 
 
+def test_provision_is_idempotent_when_auth_row_exists(client):
+    http, db_factory = client
+    db = db_factory()
+    user = User(id="auth-1", email="existing@example.com", name="Existing")
+    db.add(user)
+    db.commit()
+    db.close()
+
+    res = http.post(
+        "/v1/internal/provision",
+        json={"auth_id": "auth-1", "email": "existing@example.com", "name": "Existing"},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["created"] is False
+    assert body["user_id"] == "auth-1"
+
+
 def test_provision_creates_user(client):
     http, _ = client
     res = http.post(
@@ -93,7 +112,7 @@ def test_api_key_still_works(client):
     token = secrets.token_urlsafe(32)
     user = User(
         email="bearer@example.com",
-        better_auth_id="auth-bearer",
+        id="auth-bearer",
         api_key_hash=hashlib.sha256(token.encode()).hexdigest(),
     )
     db.add(user)
@@ -110,7 +129,7 @@ def test_api_key_still_works(client):
 def test_device_token_issues_api_key(client):
     http, db_factory = client
     db = db_factory()
-    user = User(email="device@example.com", better_auth_id="auth-device")
+    user = User(id="auth-device", email="device@example.com")
     db.add(user)
     db.flush()
     db.add(Subscription(user_id=user.id, status="active", plan_name="pro"))
@@ -131,7 +150,7 @@ def test_device_token_issues_api_key(client):
 def test_device_token_requires_active_subscription(client):
     http, db_factory = client
     db = db_factory()
-    user = User(email="free@example.com", better_auth_id="auth-free")
+    user = User(id="auth-free", email="free@example.com")
     db.add(user)
     db.flush()
     db.add(Subscription(user_id=user.id, status="none", plan_name="free"))

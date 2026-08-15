@@ -18,7 +18,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
                 claims = verify_better_auth_jwt(token)
             except jwt.PyJWTError:
                 raise HTTPException(status_code=401, detail="Invalid token") from None
-            user = db.query(User).filter(User.better_auth_id == claims.sub).first()
+            user = db.get(User, claims.sub)
             if user is None and claims.email:
                 user = db.query(User).filter(User.email == claims.email).first()
             if user is not None:
