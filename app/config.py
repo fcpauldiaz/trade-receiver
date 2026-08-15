@@ -14,8 +14,11 @@ class Settings(BaseSettings):
     ai_model: str = "gpt-4o-mini"
     ai_confidence_threshold: float = 0.8
 
-    lemon_squeezy_webhook_secret: str | None = None
-    lemon_squeezy_api_key: str | None = None
+    creem_api_key: str | None = None
+    creem_webhook_secret: str | None = None
+    creem_product_id: str | None = None
+    creem_success_url: str | None = None
+    creem_test_mode: bool = True
 
     environment: str = "development"
     cors_extra_origins: str | None = None
@@ -26,8 +29,6 @@ class Settings(BaseSettings):
     receiver_base_url: str = "http://localhost:8000"
     platform_base_url: str = "http://localhost:3000"
     ingest_path: str = "/v1/ingest"
-
-    lemon_squeezy_customer_portal_url: str | None = None
 
     tradier_api_base: str = "https://sandbox.tradier.com/v1"
     tradier_client_id: str | None = None

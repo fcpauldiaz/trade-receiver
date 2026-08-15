@@ -1,6 +1,6 @@
 # Trade Receiver
 
-FastAPI alert ingest service with AI trade parsing, Lemon Squeezy subscription gating, and multi-broker execution.
+FastAPI alert ingest service with AI trade parsing, Creem subscription gating, and multi-broker execution.
 
 ## Quick start
 
@@ -59,9 +59,21 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 | `ENCRYPTION_KEY` | Encrypts per-user broker tokens at rest |
 | `RECEIVER_BASE_URL` | Public API URL (ingest + OAuth callbacks) |
 | `PLATFORM_BASE_URL` | Where OAuth redirects after connect (e.g. `http://localhost:3000`) |
-| `LEMON_SQUEEZY_WEBHOOK_SECRET` | Subscription webhook verification |
+| `CREEM_API_KEY` | Creem API key (`creem_test_…` for sandbox) |
+| `CREEM_WEBHOOK_SECRET` | Creem webhook HMAC secret |
+| `CREEM_PRODUCT_ID` | Product ID used by `POST /v1/me/billing/checkout` |
+| `CREEM_SUCCESS_URL` | Optional checkout success redirect (defaults to `{PLATFORM_BASE_URL}/billing`) |
 | `BETTER_AUTH_URL` | Public platform URL — JWT issuer/JWKS for API auth |
 | `INTERNAL_API_SECRET` | Shared secret so signup can ensure a `subscriptions` row for the same `users` id |
+
+### Creem setup
+
+1. Sign up at [creem.io](https://creem.io) and copy a **test** API key (`creem_test_…`).
+2. CLI: `creem login --api-key creem_test_YOUR_KEY` then `creem whoami`.
+3. Create a product: `creem products create --name "Pro" --price 1999 --currency USD --billing-type recurring --billing-period every-month --tax-category saas`
+4. Put `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, and `CREEM_WEBHOOK_SECRET` in `.env`.
+5. Register webhook URL: `https://<receiver>/v1/webhooks/creem` for subscription + checkout events.
+6. Start checkout from the authenticated app via `POST /v1/me/billing/checkout`.
 
 ### OAuth app registration (your developer apps — not user accounts)
 
@@ -108,6 +120,9 @@ sequenceDiagram
 - `POST /v1/internal/device-token` — issue desktop API key (internal secret)
 - `GET /v1/me` — current user (Better Auth JWT or API key)
 - `GET /v1/me/billing` — subscription status
+- `POST /v1/me/billing/checkout` — create Creem checkout session (auth)
+- `POST /v1/me/billing/portal` — Creem customer portal link (auth)
+- `POST /v1/webhooks/creem` — Creem subscription webhooks
 - `GET /v1/me/brokers/tradier/authorize` — start Tradier OAuth
 - `GET /v1/me/brokers/schwab/authorize` — start Schwab OAuth
 - `GET /v1/reviews` — public customer reviews (newest first)
