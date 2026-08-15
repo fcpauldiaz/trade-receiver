@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     creem_webhook_secret: str | None = None
     creem_product_id: str | None = None
     creem_success_url: str | None = None
-    creem_test_mode: bool = True
+    creem_test_mode: bool = False
 
     environment: str = "development"
     cors_extra_origins: str | None = None

@@ -63,9 +63,12 @@ def upsert_subscription_from_creem(
     if sub is None:
         sub = Subscription(user_id=user.id)
         db.add(sub)
-    sub.creem_customer_id = customer_id
-    sub.creem_subscription_id = subscription_id
-    sub.variant_id = product_id
+    if customer_id is not None:
+        sub.creem_customer_id = customer_id
+    if subscription_id is not None:
+        sub.creem_subscription_id = subscription_id
+    if product_id is not None:
+        sub.variant_id = product_id
     sub.status = status
     sub.plan_name = plan_name
     sub.renews_at = renews_at

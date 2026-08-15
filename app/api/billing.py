@@ -63,7 +63,6 @@ def create_billing_checkout(user: User = Depends(get_current_user)):
             product_id=settings.creem_product_id,
             success_url=success_url,
             customer_email=user.email,
-            request_id=f"user_{user.id}",
             metadata={"user_id": user.id, "referenceId": user.id},
         )
     except CreemError as exc:
