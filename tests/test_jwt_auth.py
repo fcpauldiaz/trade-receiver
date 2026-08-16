@@ -89,6 +89,7 @@ def test_verify_jwt_when_default_urllib_user_agent_is_blocked(jwks_issuer):
         ("GET", "/v1/me/brokers"),
         ("GET", "/v1/me/settings"),
         ("POST", "/v1/me/billing/checkout"),
+        ("POST", "/v1/me/billing/confirm"),
     ],
 )
 def test_jwt_dashboard_routes_when_cloudflare_blocks_urllib_jwks(jwt_api, method, path):

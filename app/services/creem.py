@@ -39,6 +39,7 @@ def _headers() -> dict[str, str]:
     return {
         "x-api-key": settings.creem_api_key,
         "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; TradeDesky-receiver/1.0)",
     }
 
 
@@ -63,15 +64,17 @@ def create_checkout(
 
     with httpx.Client(timeout=30.0) as client:
         response = client.post(f"{creem_api_base()}/v1/checkouts", headers=_headers(), json=body)
+    return _require_ok(response)
 
-    data = _parse_json(response)
-    if response.status_code >= 400:
-        raise CreemError(
-            _error_message(data),
-            status_code=response.status_code,
-            trace_id=str(data.get("trace_id")) if isinstance(data, dict) else None,
+
+def get_checkout(checkout_id: str) -> dict[str, Any]:
+    with httpx.Client(timeout=30.0) as client:
+        response = client.get(
+            f"{creem_api_base()}/v1/checkouts",
+            headers=_headers(),
+            params={"checkout_id": checkout_id},
         )
-    return data
+    return _require_ok(response)
 
 
 def create_customer_portal(customer_id: str) -> dict[str, Any]:
@@ -82,6 +85,10 @@ def create_customer_portal(customer_id: str) -> dict[str, Any]:
             json={"customer_id": customer_id},
         )
 
+    return _require_ok(response)
+
+
+def _require_ok(response: httpx.Response) -> dict[str, Any]:
     data = _parse_json(response)
     if response.status_code >= 400:
         raise CreemError(
