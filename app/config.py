@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     creem_api_key: str | None = None
     creem_webhook_secret: str | None = None
     creem_product_id: str | None = None
+    creem_yearly_product_id: str | None = None
     creem_success_url: str | None = None
     creem_test_mode: bool = False
 

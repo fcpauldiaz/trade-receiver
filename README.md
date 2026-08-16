@@ -61,7 +61,8 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 | `PLATFORM_BASE_URL` | Where OAuth redirects after connect (e.g. `http://localhost:3000`) |
 | `CREEM_API_KEY` | Creem API key (`creem_test_…` for sandbox) |
 | `CREEM_WEBHOOK_SECRET` | Creem webhook HMAC secret |
-| `CREEM_PRODUCT_ID` | Product ID used by `POST /v1/me/billing/checkout` |
+| `CREEM_PRODUCT_ID` | Monthly Pro product ID for `POST /v1/me/billing/checkout` |
+| `CREEM_YEARLY_PRODUCT_ID` | Yearly Pro product ID for checkout `{ "plan": "yearly" }` |
 | `CREEM_SUCCESS_URL` | Optional checkout success redirect (defaults to `{PLATFORM_BASE_URL}/billing`) |
 | `BETTER_AUTH_URL` | Public platform URL — JWT issuer/JWKS for API auth |
 | `INTERNAL_API_SECRET` | Shared secret so signup can ensure a `subscriptions` row for the same `users` id |
@@ -70,8 +71,10 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 
 1. Sign up at [creem.io](https://creem.io) and copy a **test** API key (`creem_test_…`).
 2. CLI: `creem login --api-key creem_test_YOUR_KEY` then `creem whoami`.
-3. Create a product: `creem products create --name "Pro" --price 1999 --currency USD --billing-type recurring --billing-period every-month --tax-category saas`
-4. Put `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, and `CREEM_WEBHOOK_SECRET` in `.env`.
+3. Create products:
+   `creem products create --name "Pro Monthly" --description "Trade Desky Pro billed monthly" --price 3999 --currency USD --billing-type recurring --billing-period every-month --tax-category saas`
+   `creem products create --name "Pro Yearly" --description "Trade Desky Pro billed yearly" --price 29900 --currency USD --billing-type recurring --billing-period every-year --tax-category saas`
+4. Put `CREEM_API_KEY`, `CREEM_PRODUCT_ID`, `CREEM_YEARLY_PRODUCT_ID`, and `CREEM_WEBHOOK_SECRET` in `.env`.
 5. Register webhook URL: `https://<receiver>/v1/webhooks/creem` for subscription + checkout events.
 6. Start checkout from the authenticated app via `POST /v1/me/billing/checkout`.
 

@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import Base, get_db
 from app.main import app
 from app.models.tables import Subscription, User
+from app.services.creem import product_id_for_plan
 from app.services.entitlements import (
     can_process_trades,
     creem_status_from_event,
@@ -88,6 +89,69 @@ def test_checkout_requires_creem_config(client):
         settings.creem_product_id = original_product
 
     assert response.status_code == 503
+
+
+def test_product_id_for_plan(monkeypatch):
+    monkeypatch.setattr(settings, "creem_product_id", "prod_month")
+    monkeypatch.setattr(settings, "creem_yearly_product_id", "prod_year")
+    assert product_id_for_plan("monthly") == "prod_month"
+    assert product_id_for_plan("yearly") == "prod_year"
+
+
+def test_checkout_uses_yearly_product(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user = User(email="yearly@example.com")
+    db.add(user)
+    db.commit()
+    token = "dev-key"
+    user.api_key_hash = hash_api_key(token)
+    db.commit()
+    db.close()
+
+    captured: dict = {}
+
+    def fake_checkout(**kwargs):
+        captured.update(kwargs)
+        return {"checkout_url": "https://pay.example/c", "id": "chk_1"}
+
+    monkeypatch.setattr("app.api.billing.create_checkout", fake_checkout)
+    monkeypatch.setattr(settings, "creem_api_key", "creem_test_x")
+    monkeypatch.setattr(settings, "creem_product_id", "prod_month")
+    monkeypatch.setattr(settings, "creem_yearly_product_id", "prod_year")
+
+    response = test_client.post(
+        "/v1/me/billing/checkout",
+        json={"plan": "yearly"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert captured["product_id"] == "prod_year"
+    assert captured["metadata"]["plan"] == "yearly"
+
+
+def test_checkout_yearly_requires_product_id(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user = User(email="noyear@example.com")
+    db.add(user)
+    db.commit()
+    token = "dev-key"
+    user.api_key_hash = hash_api_key(token)
+    db.commit()
+    db.close()
+
+    monkeypatch.setattr(settings, "creem_api_key", "creem_test_x")
+    monkeypatch.setattr(settings, "creem_product_id", "prod_month")
+    monkeypatch.setattr(settings, "creem_yearly_product_id", None)
+
+    response = test_client.post(
+        "/v1/me/billing/checkout",
+        json={"plan": "yearly"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 503
+    assert "CREEM_YEARLY_PRODUCT_ID" in response.json()["detail"]
 
 
 def test_creem_webhook_grants_access(client):
