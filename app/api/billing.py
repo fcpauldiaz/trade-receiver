@@ -1,6 +1,6 @@
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -10,7 +10,7 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models.tables import ProcessedWebhookEvent, User
-from app.services.creem import CreemError, create_checkout, create_customer_portal
+from app.services.creem import CreemError, create_checkout, create_customer_portal, product_id_for_plan
 from app.services.entitlements import (
     can_process_trades,
     creem_status_from_event,
@@ -32,6 +32,10 @@ class BillingStatus(BaseModel):
     customer_portal_url: str | None = None
 
 
+class CheckoutRequest(BaseModel):
+    plan: Literal["monthly", "yearly"] = "monthly"
+
+
 class CheckoutResponse(BaseModel):
     checkout_url: str
     checkout_id: str | None = None
@@ -51,19 +55,25 @@ def get_billing(user: User = Depends(get_current_user), db: Session = Depends(ge
 
 
 @router.post("/me/billing/checkout", response_model=CheckoutResponse)
-def create_billing_checkout(user: User = Depends(get_current_user)):
+def create_billing_checkout(
+    user: User = Depends(get_current_user),
+    body: CheckoutRequest | None = None,
+):
     if not settings.creem_api_key:
         raise HTTPException(status_code=503, detail="CREEM_API_KEY is not configured")
-    if not settings.creem_product_id:
-        raise HTTPException(status_code=503, detail="CREEM_PRODUCT_ID is not configured")
+    plan = body.plan if body else "monthly"
+    product_id = product_id_for_plan(plan)
+    if not product_id:
+        missing = "CREEM_YEARLY_PRODUCT_ID" if plan == "yearly" else "CREEM_PRODUCT_ID"
+        raise HTTPException(status_code=503, detail=f"{missing} is not configured")
 
     success_url = settings.creem_success_url or f"{settings.platform_base_url.rstrip('/')}/billing"
     try:
         checkout = create_checkout(
-            product_id=settings.creem_product_id,
+            product_id=product_id,
             success_url=success_url,
             customer_email=user.email,
-            metadata={"user_id": user.id, "referenceId": user.id},
+            metadata={"user_id": user.id, "referenceId": user.id, "plan": plan},
         )
     except CreemError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

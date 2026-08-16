@@ -21,6 +21,8 @@ def validate_production_settings() -> None:
         raise RuntimeError("CREEM_API_KEY must be set in production")
     if not settings.creem_product_id:
         raise RuntimeError("CREEM_PRODUCT_ID must be set in production")
+    if not settings.creem_yearly_product_id:
+        raise RuntimeError("CREEM_YEARLY_PRODUCT_ID must be set in production")
     api_key = settings.creem_api_key or ""
     if api_key and not api_key.startswith("creem_test_") and settings.creem_test_mode:
         raise RuntimeError("CREEM_TEST_MODE must be false in production when using a live Creem API key")

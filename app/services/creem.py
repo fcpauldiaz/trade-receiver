@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -15,6 +15,15 @@ class CreemError(RuntimeError):
         super().__init__(message)
         self.status_code = status_code
         self.trace_id = trace_id
+
+
+CheckoutPlan = Literal["monthly", "yearly"]
+
+
+def product_id_for_plan(plan: CheckoutPlan) -> str | None:
+    if plan == "yearly":
+        return settings.creem_yearly_product_id
+    return settings.creem_product_id
 
 
 def creem_api_base() -> str:
