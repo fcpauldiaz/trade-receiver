@@ -3,7 +3,7 @@ import secrets
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -40,6 +40,44 @@ def client(monkeypatch):
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app), SessionLocal
     app.dependency_overrides.clear()
+
+
+def test_provision_loads_better_auth_millisecond_timestamps(client):
+    http, db_factory = client
+    db = db_factory()
+    db.execute(
+        text(
+            """
+            INSERT INTO users (
+              id, email, name, email_verified, created_at, updated_at,
+              default_mode, max_contracts, live_trading_enabled, sizing_mode,
+              fixed_contracts, risk_percent, onboarding_completed
+            ) VALUES (
+              'auth-ms', 'ms@example.com', 'Ms', 0, 1786843742238, 1786843742238,
+              'paper', 1, 0, 'alert_inferred', 1, 1.0, 0
+            )
+            """
+        )
+    )
+    db.commit()
+    db.close()
+
+    res = http.post(
+        "/v1/internal/provision",
+        json={"auth_id": "auth-ms", "email": "ms@example.com", "name": "Ms"},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["created"] is False
+    assert body["user_id"] == "auth-ms"
+
+    db = db_factory()
+    user = db.get(User, "auth-ms")
+    assert user is not None
+    assert user.subscription is not None
+    assert user.subscription.status == "none"
+    db.close()
 
 
 def test_provision_is_idempotent_when_auth_row_exists(client):
