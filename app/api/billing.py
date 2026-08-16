@@ -222,7 +222,10 @@ def _checkout_is_paid(checkout: dict[str, Any]) -> bool:
     if isinstance(order, dict) and str(order.get("status") or "").lower() == "paid":
         _, subscription_id, _ = extract_creem_ids(checkout)
         return bool(subscription_id)
-    status = _object_status(checkout)
+    status = str(_object_status(checkout) or "").lower()
+    if status == "completed":
+        _, subscription_id, _ = extract_creem_ids(checkout)
+        return bool(subscription_id)
     return status in _ACTIVE_CHECKOUT_STATUSES
 
 
