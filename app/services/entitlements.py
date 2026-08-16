@@ -129,14 +129,32 @@ def extract_creem_ids(obj: dict[str, Any]) -> tuple[str | None, str | None, str 
 def extract_creem_user_ref(
     obj: dict[str, Any], metadata: dict[str, Any] | None = None
 ) -> tuple[str | None, str | None]:
-    meta = metadata if metadata is not None else obj.get("metadata") or {}
-    if not isinstance(meta, dict):
-        meta = {}
-    user_id = meta.get("user_id") or meta.get("referenceId") or meta.get("reference_id")
+    blobs: list[dict[str, Any]] = []
+    if isinstance(metadata, dict):
+        blobs.append(metadata)
+    obj_meta = obj.get("metadata")
+    if isinstance(obj_meta, dict):
+        blobs.append(obj_meta)
+
     email = None
     customer = obj.get("customer")
     if isinstance(customer, dict):
         email = customer.get("email")
+        customer_meta = customer.get("metadata")
+        if isinstance(customer_meta, dict):
+            blobs.append(customer_meta)
+
+    subscription = obj.get("subscription")
+    if isinstance(subscription, dict):
+        subscription_meta = subscription.get("metadata")
+        if isinstance(subscription_meta, dict):
+            blobs.append(subscription_meta)
+
+    user_id = None
+    for meta in blobs:
+        user_id = meta.get("user_id") or meta.get("referenceId") or meta.get("reference_id")
+        if user_id:
+            break
     return _as_str(user_id), _as_str(email)
 
 
