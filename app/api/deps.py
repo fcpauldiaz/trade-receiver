@@ -1,4 +1,5 @@
 import hashlib
+import logging
 
 import jwt
 from fastapi import Depends, HTTPException, Request
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.tables import User
 from app.services.jwt_auth import hash_api_key, verify_better_auth_jwt
+
+logger = logging.getLogger(__name__)
 
 
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -17,6 +20,7 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
             try:
                 claims = verify_better_auth_jwt(token)
             except jwt.PyJWTError:
+                logger.warning("Better Auth JWT verification failed", exc_info=True)
                 raise HTTPException(status_code=401, detail="Invalid token") from None
             user = db.get(User, claims.sub)
             if user is None and claims.email:
