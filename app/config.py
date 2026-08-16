@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     receiver_base_url: str = "http://localhost:8000"
     platform_base_url: str = "http://localhost:3000"
     ingest_path: str = "/v1/ingest"
+    desktop_assets_dir: str = "./data/desktop"
 
     tradier_api_base: str = "https://sandbox.tradier.com/v1"
     tradier_client_id: str | None = None
