@@ -39,7 +39,7 @@ Set production env vars (see `.env.example`). For Turso:
 | `DATABASE_URL` | `libsql://your-db-org.turso.io` |
 | `TURSO_AUTH_TOKEN` | token from `turso db tokens create` |
 
-No `/app/data` volume is required for remote Turso.
+No `/app/data` volume is required for remote Turso **except** desktop installers. Coolify mounts `/app/data/desktop` so Sparkle/WinSparkle assets survive redeploys.
 
 ```bash
 docker build -t trade-receiver .

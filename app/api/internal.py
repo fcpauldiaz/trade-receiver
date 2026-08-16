@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models.tables import Subscription, User
+from app.services.desktop_assets import save_asset
 from app.services.entitlements import can_process_trades
 from app.services.jwt_auth import generate_api_key, hash_api_key
 
@@ -100,3 +101,26 @@ def issue_device_token(body: DeviceTokenRequest, db: Session = Depends(get_db)):
     base = settings.receiver_base_url.rstrip("/")
     path = settings.ingest_path if settings.ingest_path.startswith("/") else f"/{settings.ingest_path}"
     return DeviceTokenResponse(api_key=api_key, ingest_url=f"{base}{path}")
+
+
+class DesktopAssetsResponse(BaseModel):
+    saved: list[str]
+
+
+@router.post(
+    "/desktop/assets",
+    response_model=DesktopAssetsResponse,
+    dependencies=[Depends(_verify_internal_secret)],
+)
+async def upload_desktop_assets(files: list[UploadFile] = File(...)):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files")
+    saved: list[str] = []
+    for upload in files:
+        name = upload.filename or ""
+        data = await upload.read()
+        try:
+            saved.extend(save_asset(name, data))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return DesktopAssetsResponse(saved=saved)

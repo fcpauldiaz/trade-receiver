@@ -13,7 +13,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.hits: dict[str, list[float]] = defaultdict(list)
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/health", "/docs", "/openapi.json"):
+        if request.url.path in ("/health", "/docs", "/openapi.json") or request.url.path.startswith(
+            "/desktop/"
+        ):
             return await call_next(request)
         client = request.client.host if request.client else "unknown"
         key = f"{client}:{request.url.path}"
