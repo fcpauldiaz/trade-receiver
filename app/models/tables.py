@@ -5,6 +5,7 @@ from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Te
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.models.types import UnixTimestampMs
 
 
 def _uuid() -> str:
@@ -29,8 +30,8 @@ class User(Base):
     risk_percent: Mapped[float] = mapped_column(Float, default=1.0)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     default_broker: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UnixTimestampMs, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(UnixTimestampMs, nullable=True)
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
     broker_connections: Mapped[list["BrokerConnection"]] = relationship(back_populates="user")
