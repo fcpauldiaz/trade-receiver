@@ -15,8 +15,15 @@ def validate_production_settings() -> None:
         raise RuntimeError("API_SECRET_KEY must be set in production")
     if settings.encryption_key in INSECURE_DEFAULTS:
         raise RuntimeError("ENCRYPTION_KEY must be set in production")
-    if not settings.lemon_squeezy_webhook_secret:
-        raise RuntimeError("LEMON_SQUEEZY_WEBHOOK_SECRET must be set in production")
+    if not settings.creem_webhook_secret:
+        raise RuntimeError("CREEM_WEBHOOK_SECRET must be set in production")
+    if not settings.creem_api_key:
+        raise RuntimeError("CREEM_API_KEY must be set in production")
+    if not settings.creem_product_id:
+        raise RuntimeError("CREEM_PRODUCT_ID must be set in production")
+    api_key = settings.creem_api_key or ""
+    if api_key and not api_key.startswith("creem_test_") and settings.creem_test_mode:
+        raise RuntimeError("CREEM_TEST_MODE must be false in production when using a live Creem API key")
     if not settings.internal_api_secret or settings.internal_api_secret == "dev-internal-secret":
         raise RuntimeError("INTERNAL_API_SECRET must be set in production")
     if not settings.better_auth_url or settings.better_auth_url.startswith("http://localhost"):
