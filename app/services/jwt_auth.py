@@ -7,6 +7,9 @@ from jwt import PyJWKClient
 
 from app.config import settings
 
+# Cloudflare bot fight blocks Python-urllib's default User-Agent (403).
+_JWKS_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; TradeDesky-receiver/1.0)"}
+
 _jwks_client: PyJWKClient | None = None
 _jwks_url: str | None = None
 
@@ -26,7 +29,12 @@ def _get_jwks_client() -> PyJWKClient:
     global _jwks_client, _jwks_url
     url = _jwks_endpoint()
     if _jwks_client is None or _jwks_url != url:
-        _jwks_client = PyJWKClient(url, cache_keys=True, lifespan=3600)
+        _jwks_client = PyJWKClient(
+            url,
+            cache_keys=True,
+            lifespan=3600,
+            headers=_JWKS_HEADERS,
+        )
         _jwks_url = url
     return _jwks_client
 
