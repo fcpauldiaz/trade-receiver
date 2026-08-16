@@ -1,9 +1,10 @@
 import hashlib
 import secrets
+from datetime import datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -11,6 +12,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models.tables import Subscription, User
 from app.services.jwt_auth import hash_api_key
+from tests.db_helpers import insert_better_auth_user
 
 INTERNAL_SECRET = "test-internal-secret"
 
@@ -45,21 +47,11 @@ def client(monkeypatch):
 def test_provision_loads_better_auth_millisecond_timestamps(client):
     http, db_factory = client
     db = db_factory()
-    db.execute(
-        text(
-            """
-            INSERT INTO users (
-              id, email, name, email_verified, created_at, updated_at,
-              default_mode, max_contracts, live_trading_enabled, sizing_mode,
-              fixed_contracts, risk_percent, onboarding_completed
-            ) VALUES (
-              'auth-ms', 'ms@example.com', 'Ms', 0, 1786843742238, 1786843742238,
-              'paper', 1, 0, 'alert_inferred', 1, 1.0, 0
-            )
-            """
-        )
-    )
+    insert_better_auth_user(db, user_id="auth-ms", email="ms@example.com")
     db.commit()
+    user = db.get(User, "auth-ms")
+    assert user is not None
+    assert isinstance(user.created_at, datetime)
     db.close()
 
     res = http.post(
