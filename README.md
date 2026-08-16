@@ -169,4 +169,4 @@ DATABASE_URL=sqlite:///./data/test.db pytest
 ## Related repos
 
 - [trade-desky](https://github.com/fcpauldiaz/trade-desky) — TanStack Start UI (marketing + logged-in app)
-- [notification-watcher](https://github.com/fcpauldiaz/discord-data-scraper) — macOS/Windows desktop alert forwarder
+- [trade-desky-watcher](https://github.com/fcpauldiaz/trade-desky-watcher) — macOS/Windows desktop alert forwarder
