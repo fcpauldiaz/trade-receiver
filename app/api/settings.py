@@ -1,7 +1,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -22,6 +22,17 @@ class UserSettings(BaseModel):
     fixed_contracts: int = Field(ge=1, le=100, default=1)
     risk_percent: float = Field(gt=0, le=100, default=1.0)
     default_broker: str | None = None
+    trade_filter_prompt: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("trade_filter_prompt", mode="before")
+    @classmethod
+    def blank_prompt_to_none(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value  # type: ignore[return-value]
 
 
 @router.get("/settings", response_model=UserSettings)
@@ -35,6 +46,7 @@ def get_settings(user: User = Depends(get_current_user)):
         fixed_contracts=user.fixed_contracts,
         risk_percent=user.risk_percent,
         default_broker=user.default_broker,
+        trade_filter_prompt=user.trade_filter_prompt,
     )
 
 
@@ -51,6 +63,7 @@ def update_settings(
     user.sizing_mode = body.sizing_mode
     user.fixed_contracts = body.fixed_contracts
     user.risk_percent = body.risk_percent
+    user.trade_filter_prompt = body.trade_filter_prompt
     if body.default_broker is not None:
         user.default_broker = body.default_broker
     db.commit()
