@@ -6,7 +6,6 @@ from app.config import settings
 from app.database import get_db
 from app.models.tables import Subscription, User
 from app.services.desktop_assets import save_asset
-from app.services.entitlements import can_process_trades
 from app.services.jwt_auth import generate_api_key, hash_api_key
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
@@ -92,9 +91,18 @@ def issue_device_token(body: DeviceTokenRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="auth_id or email required")
     user = _resolve_user(db, body.auth_id, body.email)
     if user is None:
-        raise HTTPException(status_code=404, detail="User not provisioned")
-    if not can_process_trades(user):
-        raise HTTPException(status_code=402, detail="Active subscription required")
+        if not body.auth_id or not body.email:
+            raise HTTPException(status_code=404, detail="User not provisioned")
+        user = User(
+            id=body.auth_id,
+            email=body.email,
+            api_key_hash=hash_api_key(generate_api_key()),
+        )
+        db.add(user)
+        db.flush()
+        _ensure_subscription(db, user)
+        db.commit()
+        db.refresh(user)
     api_key = generate_api_key()
     user.api_key_hash = hash_api_key(api_key)
     db.commit()

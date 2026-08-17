@@ -177,7 +177,7 @@ def test_device_token_issues_api_key(client):
     assert body["ingest_url"].endswith("/v1/ingest")
 
 
-def test_device_token_requires_active_subscription(client):
+def test_device_token_issues_key_without_subscription(client):
     http, db_factory = client
     db = db_factory()
     user = User(id="auth-free", email="free@example.com")
@@ -192,5 +192,17 @@ def test_device_token_requires_active_subscription(client):
         json={"auth_id": "auth-free", "email": "free@example.com"},
         headers={"X-Internal-Secret": INTERNAL_SECRET},
     )
-    assert res.status_code == 402
+    assert res.status_code == 200
+    assert res.json()["api_key"]
+
+
+def test_device_token_provisions_missing_user(client):
+    http, _db_factory = client
+    res = http.post(
+        "/v1/internal/device-token",
+        json={"auth_id": "auth-new", "email": "new@example.com"},
+        headers={"X-Internal-Secret": INTERNAL_SECRET},
+    )
+    assert res.status_code == 200
+    assert res.json()["api_key"]
 
