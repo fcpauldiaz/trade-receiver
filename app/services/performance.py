@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -39,7 +39,15 @@ def list_trades(
         if from_dt:
             stmt = stmt.where(TradeExecution.created_at >= from_dt)
         if to_dt:
-            stmt = stmt.where(TradeExecution.created_at <= to_dt)
+            if (
+                to_dt.hour == 0
+                and to_dt.minute == 0
+                and to_dt.second == 0
+                and to_dt.microsecond == 0
+            ):
+                stmt = stmt.where(TradeExecution.created_at < to_dt + timedelta(days=1))
+            else:
+                stmt = stmt.where(TradeExecution.created_at <= to_dt)
     stmt = stmt.order_by(TradeExecution.created_at.desc()).limit(limit)
     return list(db.scalars(stmt))
 

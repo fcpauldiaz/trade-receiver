@@ -73,7 +73,7 @@ async def _reconcile_if_possible(db: Session, user: User) -> None:
 @router.get("/trades", response_model=list[TradeResponse])
 async def get_trades(
     mode: str | None = Query(default=None),
-    month: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    month: str | None = Query(default=None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     from_dt: datetime | None = Query(default=None, alias="from"),
     to_dt: datetime | None = Query(default=None, alias="to"),
     limit: int = Query(default=100, le=500),
@@ -95,7 +95,7 @@ async def get_trades(
 
 @router.get("/performance/daily")
 async def get_daily_performance(
-    month: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
