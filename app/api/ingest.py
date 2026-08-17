@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.agents.decide_action import decide_action
+from app.agents.filter_trade import apply_trade_filter
 from app.agents.parse_alert import parse_alert
 from app.api.deps import get_current_user
 from app.database import get_db
@@ -74,6 +75,8 @@ async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
     else:
         intent = await parse_alert(text)
         intent = decide_action(intent, user)
+        if intent.action != "skip":
+            intent = await apply_trade_filter(intent, user)
         if intent.action == "skip":
             alert.skip_reason = intent.rationale or "skipped"
             alert.processed = True

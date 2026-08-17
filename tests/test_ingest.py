@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,10 +8,30 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.agents.filter_trade import FilterDecision
 from app.database import Base, get_db
 from app.main import app
 from app.models.tables import InboundAlert, Subscription, User
 from tests.test_e2e import FakeAdapter, _seed_paid_user
+
+_ALERT = {"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"}
+_ETERMINAL = {
+    "type": "signal",
+    "firedAt": "2026-07-21T15:00:00.000Z",
+    "session": "rth",
+    "caution": None,
+    "signal": {
+        "id": "eterminal-sig-filter",
+        "time": 1721596500,
+        "price": 6325,
+        "shape": "circle",
+        "side": "long",
+        "variant": "extreme",
+        "color": "green",
+        "source": "extension-overlay",
+    },
+    "context": {"currentPrice": 6325},
+}
 
 
 @pytest.fixture()
@@ -193,3 +214,115 @@ def test_ingest_skips_outside_rth(ingest_client, db_session: Session, monkeypatc
     data = res.json()
     assert data["status"] == "skipped"
     assert "regular trading hours" in data["reason"]
+
+
+def test_settings_roundtrip_trade_filter_prompt(ingest_client, db_session: Session):
+    user, token = _seed_paid_user(db_session)
+    headers = {"Authorization": f"Bearer {token}"}
+    got = ingest_client.get("/v1/me/settings", headers=headers)
+    assert got.status_code == 200
+    body = got.json()
+    assert body["trade_filter_prompt"] is None
+
+    body["trade_filter_prompt"] = "  only puts  "
+    put = ingest_client.put("/v1/me/settings", headers=headers, json=body)
+    assert put.status_code == 200
+    assert put.json()["trade_filter_prompt"] == "only puts"
+
+    again = ingest_client.get("/v1/me/settings", headers=headers)
+    assert again.json()["trade_filter_prompt"] == "only puts"
+
+    body["trade_filter_prompt"] = "   "
+    cleared = ingest_client.put("/v1/me/settings", headers=headers, json=body)
+    assert cleared.status_code == 200
+    assert cleared.json()["trade_filter_prompt"] is None
+
+
+def test_ingest_empty_prompt_does_not_call_openai(ingest_client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    openai = AsyncMock()
+    monkeypatch.setattr("app.agents.filter_trade._filter_with_openai", openai)
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=_ALERT,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    openai.assert_not_called()
+
+
+def test_ingest_skips_when_filter_rejects(ingest_client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.trade_filter_prompt = "skip calls"
+    db_session.commit()
+    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(
+        "app.agents.filter_trade._filter_with_openai",
+        AsyncMock(return_value=FilterDecision(take=False, reason="calls are banned")),
+    )
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=_ALERT,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "skipped"
+    assert "calls are banned" in data["reason"]
+    stored = db_session.query(InboundAlert).one()
+    assert stored.skip_reason and "calls are banned" in stored.skip_reason
+
+
+def test_ingest_continues_when_filter_takes(ingest_client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.trade_filter_prompt = "only SPY"
+    db_session.commit()
+    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(
+        "app.agents.filter_trade._filter_with_openai",
+        AsyncMock(return_value=FilterDecision(take=True, reason="ok")),
+    )
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=_ALERT,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] in {"filled", "validation_failed"}
+
+
+def test_ingest_fail_closed_when_prompt_set_without_key(ingest_client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.trade_filter_prompt = "only puts"
+    db_session.commit()
+    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", None)
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=_ALERT,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "skipped"
+    assert "filter unavailable" in data["reason"]
+
+
+def test_eterminal_does_not_call_trade_filter(ingest_client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.trade_filter_prompt = "skip everything"
+    db_session.commit()
+    filter_fn = AsyncMock()
+    monkeypatch.setattr("app.api.ingest.apply_trade_filter", filter_fn)
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=_ETERMINAL,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] == "filled"
+    filter_fn.assert_not_called()

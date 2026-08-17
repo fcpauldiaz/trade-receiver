@@ -24,6 +24,7 @@ class User(Base):
     default_mode: Mapped[str] = mapped_column(String(16), default="paper")
     max_contracts: Mapped[int] = mapped_column(Integer, default=1)
     allowed_tickers: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trade_filter_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     live_trading_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     sizing_mode: Mapped[str] = mapped_column(String(32), default="alert_inferred")
     fixed_contracts: Mapped[int] = mapped_column(Integer, default=1)
