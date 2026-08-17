@@ -6,11 +6,22 @@ from sqlalchemy.orm import Session
 from app.models.tables import TradeExecution
 
 
+def month_bounds(month: str) -> tuple[datetime, datetime]:
+    year, mon = map(int, month.split("-"))
+    start = datetime(year, mon, 1)
+    if mon == 12:
+        end = datetime(year + 1, 1, 1)
+    else:
+        end = datetime(year, mon + 1, 1)
+    return start, end
+
+
 def list_trades(
     db: Session,
     user_id: str,
     *,
     mode: str | None = None,
+    month: str | None = None,
     from_dt: datetime | None = None,
     to_dt: datetime | None = None,
     limit: int = 100,
@@ -21,10 +32,14 @@ def list_trades(
     )
     if mode:
         stmt = stmt.where(TradeExecution.mode == mode)
-    if from_dt:
-        stmt = stmt.where(TradeExecution.created_at >= from_dt)
-    if to_dt:
-        stmt = stmt.where(TradeExecution.created_at <= to_dt)
+    if month:
+        start, end = month_bounds(month)
+        stmt = stmt.where(TradeExecution.created_at >= start, TradeExecution.created_at < end)
+    else:
+        if from_dt:
+            stmt = stmt.where(TradeExecution.created_at >= from_dt)
+        if to_dt:
+            stmt = stmt.where(TradeExecution.created_at <= to_dt)
     stmt = stmt.order_by(TradeExecution.created_at.desc()).limit(limit)
     return list(db.scalars(stmt))
 
@@ -39,12 +54,7 @@ def trade_cashflow(row: TradeExecution) -> float | None:
 
 
 def daily_pnl(db: Session, user_id: str, month: str) -> dict[str, float]:
-    year, mon = map(int, month.split("-"))
-    start = datetime(year, mon, 1)
-    if mon == 12:
-        end = datetime(year + 1, 1, 1)
-    else:
-        end = datetime(year, mon + 1, 1)
+    start, end = month_bounds(month)
 
     rows = db.scalars(
         select(TradeExecution).where(
