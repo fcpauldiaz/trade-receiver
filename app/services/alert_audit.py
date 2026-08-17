@@ -45,11 +45,21 @@ def payload_preview(raw_payload: str) -> tuple[str, str, str, str]:
     return payload.app_id, payload.platform, payload.title, text
 
 
+def _is_take_profit_leg(trade: TradeExecution) -> bool:
+    if not trade.broker_response_json:
+        return False
+    try:
+        payload = json.loads(trade.broker_response_json)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("role") == "take_profit"
+
+
 def alert_outcome(alert: InboundAlert, trade: TradeExecution | None) -> AlertOutcome:
+    if alert.skip_reason or (trade is not None and trade.status == "skipped"):
+        return "skipped"
     if trade is not None:
         return "executed"
-    if alert.skip_reason:
-        return "skipped"
     return "pending"
 
 
@@ -69,7 +79,15 @@ def list_alert_audit(db: Session, user_id: str, limit: int = 100) -> list[AlertA
         .filter(TradeExecution.alert_id.in_(ids))
         .all()
     )
-    trade_by_alert = {trade.alert_id: trade for trade in trades if trade.alert_id}
+    trade_by_alert: dict[str, TradeExecution] = {}
+    for trade in trades:
+        if not trade.alert_id:
+            continue
+        existing = trade_by_alert.get(trade.alert_id)
+        if existing is None:
+            trade_by_alert[trade.alert_id] = trade
+        elif _is_take_profit_leg(existing) and not _is_take_profit_leg(trade):
+            trade_by_alert[trade.alert_id] = trade
     items: list[AlertAuditItem] = []
     for row in rows:
         trade = trade_by_alert.get(row.id)
