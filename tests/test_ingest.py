@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models.tables import Subscription, User
+from app.models.tables import InboundAlert, Subscription, User
 from tests.test_e2e import FakeAdapter, _seed_paid_user
 
 
@@ -94,6 +94,86 @@ def test_ingest_inactive_subscription(ingest_client, db_session: Session):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert res.status_code == 402
+    stored = db_session.query(InboundAlert).all()
+    assert len(stored) == 1
+    assert stored[0].processed is True
+    assert stored[0].skip_reason
+
+
+def test_alerts_requires_auth(ingest_client):
+    res = ingest_client.get("/v1/me/alerts")
+    assert res.status_code == 401
+
+
+def test_alerts_lists_skipped_capture(ingest_client, db_session: Session, monkeypatch):
+    user, _ = _seed_paid_user(db_session)
+    token = "test-api-key"
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    ingest = ingest_client.post(
+        "/v1/ingest",
+        json={
+            "app_id": "com.hnc.Discord",
+            "title": "Alerts",
+            "body": "BTO SPY 580C 6/20 @ 2.50",
+            "platform": "macos",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert ingest.status_code == 200
+
+    res = ingest_client.get("/v1/me/alerts", headers={"Authorization": f"Bearer {token}"})
+    assert res.status_code == 200
+    items = res.json()
+    assert len(items) == 1
+    item = items[0]
+    assert item["outcome"] == "skipped"
+    assert item["source_app"] == "com.hnc.Discord"
+    assert item["platform"] == "macos"
+    assert item["title"] == "Alerts"
+    assert "BTO SPY" in item["text"]
+    assert "raw_payload" not in item
+    assert item["trade_id"] is None
+
+
+def test_alerts_are_user_scoped(ingest_client, db_session: Session):
+    user_a, _ = _seed_paid_user(db_session)
+    token_a = "test-api-key"
+    user_a.api_key_hash = hashlib.sha256(token_a.encode()).hexdigest()
+    other = User(
+        email="other@example.com",
+        api_key_hash=hashlib.sha256(b"other-key").hexdigest(),
+    )
+    db_session.add(other)
+    db_session.flush()
+    db_session.add(
+        InboundAlert(
+            user_id=other.id,
+            idempotency_key="secret-other",
+            raw_payload='{"title":"Secret","body":"do not leak"}',
+            normalized_text="Secret\ndo not leak",
+        )
+    )
+    db_session.add(
+        InboundAlert(
+            user_id=user_a.id,
+            idempotency_key="mine",
+            raw_payload='{"title":"Mine","body":"BTO SPY","app_id":"discord"}',
+            normalized_text="Mine\nBTO SPY",
+            skip_reason="no broker connected",
+            processed=True,
+        )
+    )
+    db_session.commit()
+
+    res = ingest_client.get("/v1/me/alerts", headers={"Authorization": f"Bearer {token_a}"})
+    assert res.status_code == 200
+    items = res.json()
+    assert len(items) == 1
+    assert items[0]["title"] == "Mine"
+    assert items[0]["text"] != "Secret\ndo not leak"
 
 
 def test_ingest_skips_outside_rth(ingest_client, db_session: Session, monkeypatch):

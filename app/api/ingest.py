@@ -124,8 +124,5 @@ async def ingest_alert(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not can_process_trades(user):
-        _, reason = require_active_subscription(user)
-        raise HTTPException(status_code=402, detail=reason)
     body = await request.json()
     return await _process_inbound_alert(db, user, body)
