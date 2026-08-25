@@ -50,7 +50,10 @@ def _ensure_libsql_dialect(url: str) -> None:
 def _build_engine():
     url = normalized_database_url()
     _ensure_libsql_dialect(url)
-    return create_engine(url, connect_args=database_connect_args())
+    pool_kwargs: dict = {}
+    if "libsql" in url:
+        pool_kwargs = {"pool_size": 1, "max_overflow": 0}
+    return create_engine(url, connect_args=database_connect_args(), **pool_kwargs)
 
 
 engine = _build_engine()

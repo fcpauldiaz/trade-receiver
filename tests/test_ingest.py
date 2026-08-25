@@ -326,3 +326,70 @@ def test_eterminal_does_not_call_trade_filter(ingest_client, db_session: Session
     assert res.status_code == 200
     assert res.json()["status"] == "filled"
     filter_fn.assert_not_called()
+
+
+def test_concurrent_ingest_same_alert_serializes_without_server_error(
+    ingest_client, db_session: Session
+):
+    import asyncio
+
+    import httpx
+    from httpx import ASGITransport
+
+    from app.main import app
+
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    payload = {"title": "Alerts", "body": "BTO SPY 580C 6/20 @ 2.50", "app_id": "com.discord"}
+    headers = {"Authorization": f"Bearer {token}"}
+
+    async def run_concurrent_posts() -> list[int]:
+        transport = ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            tasks = [client.post("/v1/ingest", json=payload, headers=headers) for _ in range(8)]
+            responses = await asyncio.gather(*tasks)
+            return [response.status_code for response in responses]
+
+    status_codes = asyncio.run(run_concurrent_posts())
+
+    assert all(code == 200 for code in status_codes)
+    alerts = db_session.query(InboundAlert).filter_by(user_id=user.id).all()
+    assert len(alerts) == 1
+
+
+def test_ingest_integrity_error_returns_duplicate(ingest_client, db_session: Session, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+
+    from app.models.tables import InboundAlert
+    from app.services.webhook_normalize import idempotency_key, normalize_webhook_body
+
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    payload = {"title": "Alerts", "body": "BTO SPY 580C 6/20 @ 2.50", "app_id": "com.discord"}
+    _, webhook_payload = normalize_webhook_body(payload)
+    key = idempotency_key(user.id, webhook_payload)
+    existing = InboundAlert(
+        user_id=user.id,
+        idempotency_key=key,
+        raw_payload="{}",
+        normalized_text="cached",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    async def raise_integrity(_db, _user, _body):
+        raise IntegrityError("insert", {}, Exception("unique constraint"))
+
+    monkeypatch.setattr("app.api.ingest._process_inbound_alert", raise_integrity)
+
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert res.status_code == 200
+    assert res.json() == {"status": "duplicate", "alert_id": existing.id}
