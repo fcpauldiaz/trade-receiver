@@ -1,6 +1,7 @@
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.agents.decide_action import decide_action
@@ -18,11 +19,27 @@ from app.services.eterminal_signal import (
 )
 from app.services import market_hours
 from app.services.execute_trade import execute_trade
+from app.services.ingest_gate import ingest_processing_slot
 from app.services.option_chain import get_adapter
 from app.services.validate_trade import validate_trade
 from app.services.webhook_normalize import idempotency_key, normalize_webhook_body
 
 router = APIRouter(tags=["ingest"])
+
+
+def _resolve_idempotency_key(user: User, body: dict) -> str:
+    _, payload = normalize_webhook_body(body)
+    if is_eterminal_envelope(body):
+        return eterminal_idempotency_key(user.id, body)
+    return idempotency_key(user.id, payload)
+
+
+def _duplicate_response(db: Session, user: User, body: dict) -> dict:
+    key = _resolve_idempotency_key(user, body)
+    existing = db.query(InboundAlert).filter_by(user_id=user.id, idempotency_key=key).first()
+    if existing is not None:
+        return {"status": "duplicate", "alert_id": existing.id}
+    raise RuntimeError("ingest integrity error without matching alert row")
 
 
 def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | None:
@@ -37,10 +54,7 @@ def _resolve_broker_connection(db: Session, user: User) -> BrokerConnection | No
 
 async def _process_inbound_alert(db: Session, user: User, body: dict) -> dict:
     text, payload = normalize_webhook_body(body)
-    if is_eterminal_envelope(body):
-        key = eterminal_idempotency_key(user.id, body)
-    else:
-        key = idempotency_key(user.id, payload)
+    key = _resolve_idempotency_key(user, body)
 
     existing = db.query(InboundAlert).filter_by(user_id=user.id, idempotency_key=key).first()
     if existing:
@@ -128,4 +142,9 @@ async def ingest_alert(
     db: Session = Depends(get_db),
 ):
     body = await request.json()
-    return await _process_inbound_alert(db, user, body)
+    async with ingest_processing_slot(user.id):
+        try:
+            return await _process_inbound_alert(db, user, body)
+        except IntegrityError:
+            db.rollback()
+            return _duplicate_response(db, user, body)
