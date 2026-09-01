@@ -26,8 +26,14 @@ class DiscordWebhookPayload(BaseModel):
     embeds: list[DiscordEmbed] = Field(default_factory=list)
 
 
+AssetClass = Literal["option", "future"]
+BrokerName = Literal["schwab", "tradier", "webull", "ninjatrader"]
+FuturesAction = Literal["BUY", "SELL"]
+
+
 class TradeIntent(BaseModel):
     action: Literal["buy_to_open", "sell_to_close", "skip"] = "skip"
+    asset_class: AssetClass = "option"
     underlying: str = ""
     option_type: Literal["call", "put"] = "call"
     strike: Decimal = Decimal("0")
@@ -40,10 +46,14 @@ class TradeIntent(BaseModel):
     take_profit_pct: Decimal | None = None
     source: str = ""
     notional_usd: Decimal | None = None
+    stop_loss_ticks: int | None = None
+    profit_target_ticks: int | None = None
+    external_id: str = ""
 
 
 class ValidatedTrade(BaseModel):
     action: Literal["buy_to_open", "sell_to_close", "skip"]
+    asset_class: AssetClass = "option"
     underlying: str
     option_type: Literal["call", "put"]
     strike: Decimal
@@ -53,7 +63,7 @@ class ValidatedTrade(BaseModel):
     limit_price: Decimal | None
     confidence: float
     rationale: str
-    broker: Literal["schwab", "tradier", "webull"]
+    broker: BrokerName
     contract_symbol: str
     bid: Decimal | None = None
     ask: Decimal | None = None
@@ -62,3 +72,29 @@ class ValidatedTrade(BaseModel):
     take_profit_pct: Decimal | None = None
     source: str = ""
     notional_usd: Decimal | None = None
+
+
+class ValidatedFuturesTrade(BaseModel):
+    asset_class: Literal["future"] = "future"
+    action: FuturesAction
+    symbol: str
+    quantity: int
+    order_type: Literal["MARKET", "LIMIT"] = "MARKET"
+    stop_loss_ticks: int | None = None
+    profit_target_ticks: int | None = None
+    confidence: float
+    rationale: str
+    broker: Literal["ninjatrader"]
+    external_id: str = ""
+    validation_errors: list[str] = Field(default_factory=list)
+
+
+class NinjaTraderOrderPayload(BaseModel):
+    id: str
+    symbol: str
+    action: FuturesAction
+    orderType: Literal["MARKET", "LIMIT"] = "MARKET"
+    quantity: int
+    stopLossTicks: int | None = None
+    profitTargetTicks: int | None = None
+    dryRun: bool | None = None

@@ -56,7 +56,7 @@ def db_session(monkeypatch):
     async def fake_get_adapter(db, conn):
         return FakeAdapter()
 
-    monkeypatch.setattr("app.api.ingest.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
     monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
     db = SessionLocal()
     yield db
@@ -241,7 +241,7 @@ def test_settings_roundtrip_trade_filter_prompt(ingest_client, db_session: Sessi
 def test_ingest_empty_prompt_does_not_call_openai(ingest_client, db_session: Session, monkeypatch):
     user, token = _seed_paid_user(db_session)
     openai = AsyncMock()
-    monkeypatch.setattr("app.agents.filter_trade._filter_with_openai", openai)
+    monkeypatch.setattr("app.agents.filter_trade._filter_with_llm", openai)
 
     res = ingest_client.post(
         "/v1/ingest",
@@ -258,7 +258,7 @@ def test_ingest_skips_when_filter_rejects(ingest_client, db_session: Session, mo
     db_session.commit()
     monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
     monkeypatch.setattr(
-        "app.agents.filter_trade._filter_with_openai",
+        "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=False, reason="calls are banned")),
     )
 
@@ -281,7 +281,7 @@ def test_ingest_continues_when_filter_takes(ingest_client, db_session: Session, 
     db_session.commit()
     monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
     monkeypatch.setattr(
-        "app.agents.filter_trade._filter_with_openai",
+        "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=True, reason="ok")),
     )
 
@@ -316,7 +316,7 @@ def test_eterminal_does_not_call_trade_filter(ingest_client, db_session: Session
     user.trade_filter_prompt = "skip everything"
     db_session.commit()
     filter_fn = AsyncMock()
-    monkeypatch.setattr("app.api.ingest.apply_trade_filter", filter_fn)
+    monkeypatch.setattr("app.services.ingest_pipeline.apply_trade_filter", filter_fn)
 
     res = ingest_client.post(
         "/v1/ingest",
@@ -384,7 +384,7 @@ def test_ingest_integrity_error_returns_duplicate(ingest_client, db_session: Ses
     async def raise_integrity(_db, _user, _body):
         raise IntegrityError("insert", {}, Exception("unique constraint"))
 
-    monkeypatch.setattr("app.api.ingest._process_inbound_alert", raise_integrity)
+    monkeypatch.setattr("app.api.ingest.process_inbound_alert", raise_integrity)
 
     res = ingest_client.post(
         "/v1/ingest",

@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.brokers.base import BrokerAdapter, OptionContract
+from app.brokers.ninjatrader import NinjaTraderAdapter
 from app.brokers.schwab import SchwabAdapter
 from app.brokers.tradier import TradierAdapter
 from app.brokers.webull import WebullAdapter
@@ -42,6 +43,8 @@ async def get_adapter(db: Session, connection: BrokerConnection) -> BrokerAdapte
         )
     if connection.broker == "webull":
         return WebullAdapter(access_token=access_token)
+    if connection.broker == "ninjatrader":
+        return NinjaTraderAdapter.from_credentials(raw)
     raise ValueError(f"Unsupported broker: {connection.broker}")
 
 
@@ -64,6 +67,8 @@ def get_adapter_sync(connection: BrokerConnection) -> BrokerAdapter:
         )
     if connection.broker == "webull":
         return WebullAdapter(access_token=access_token)
+    if connection.broker == "ninjatrader":
+        return NinjaTraderAdapter.from_credentials(raw)
     raise ValueError(f"Unsupported broker: {connection.broker}")
 
 

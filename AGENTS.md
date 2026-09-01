@@ -20,17 +20,17 @@
   (SQLite at `sqlite:///./data/trade.db`, `INTERNAL_API_SECRET=dev-internal-secret`).
   The `data/` dir is auto-created; SQLite DB files are gitignored.
 - Alembic migrations run automatically on app startup (`upgrade head`); there is
-  no manual migration step for local dev. Current head is `012`.
+  no manual migration step for local dev. Current head is `014`.
 - `GET /health` returns DB status and the current migration head — use it as a
   readiness check.
 
 ### Tests
 - Run with an isolated DB: `DATABASE_URL=sqlite:///./data/test.db pytest`
   (matches CI in `.github/workflows/ci.yml`). All external services
-  (OpenAI, brokers, Creem billing, Better Auth) are mocked in the suite.
+  (OpenAI, Vercel AI Gateway, brokers, Creem billing, Better Auth) are mocked in the suite.
 
 ### External dependencies (not needed to boot or test)
-- OpenAI, Tradier/Schwab/Webull brokers, Creem billing, and the
+- OpenAI / Vercel AI Gateway, Tradier/Schwab/Webull/NinjaTrader brokers, Creem billing, and the
   `trade-platform` Better Auth issuer are external network services. They are
   optional for running the app and the test suite; only a full production
   auth→connect→ingest→execute flow needs real credentials.

@@ -5,6 +5,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.models.tables import User
 from app.schemas.trade import TradeIntent
+from app.services.llm import chat_json_completion, llm_configured
 
 SKIP_REASON_MAX = 255
 PROMPT_PREFIX = "user prompt: "
@@ -27,6 +28,7 @@ def _normalized_prompt(user: User) -> str | None:
 def _compact_intent(intent: TradeIntent) -> dict:
     return {
         "action": intent.action,
+        "asset_class": intent.asset_class,
         "underlying": intent.underlying,
         "option_type": intent.option_type,
         "strike": str(intent.strike),
@@ -35,6 +37,8 @@ def _compact_intent(intent: TradeIntent) -> dict:
         "order_type": intent.order_type,
         "confidence": intent.confidence,
         "rationale": intent.rationale,
+        "stop_loss_ticks": intent.stop_loss_ticks,
+        "profit_target_ticks": intent.profit_target_ticks,
     }
 
 
@@ -49,10 +53,10 @@ async def apply_trade_filter(intent: TradeIntent, user: User) -> TradeIntent:
     prompt = _normalized_prompt(user)
     if prompt is None:
         return intent
-    if not settings.openai_api_key:
+    if not llm_configured():
         return _skip(intent, "filter unavailable")
     try:
-        decision = await _filter_with_openai(prompt, intent)
+        decision = await _filter_with_llm(prompt, intent)
     except Exception:
         return _skip(intent, "filter unavailable")
     if decision.take:
@@ -61,9 +65,7 @@ async def apply_trade_filter(intent: TradeIntent, user: User) -> TradeIntent:
     return _skip(intent, reason)
 
 
-async def _filter_with_openai(prompt: str, intent: TradeIntent) -> FilterDecision:
-    import httpx
-
+async def _filter_with_llm(prompt: str, intent: TradeIntent) -> FilterDecision:
     schema = FilterDecision.model_json_schema()
     user_content = (
         "User rules:\n"
@@ -73,27 +75,15 @@ async def _filter_with_openai(prompt: str, intent: TradeIntent) -> FilterDecisio
         "Schema:\n"
         f"{json.dumps(schema)}"
     )
-    async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={
-                "model": settings.ai_model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "Follow the user's trading rules and return only JSON. "
-                            "Set take=true to execute the trade as parsed. "
-                            "Set take=false to skip it. "
-                            "Do not invent fills or change strike, quantity, or side."
-                        ),
-                    },
-                    {"role": "user", "content": user_content},
-                ],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return FilterDecision.model_validate_json(content)
+    content = await chat_json_completion(
+        system=(
+            "Follow the user's trading rules and return only JSON. "
+            "Set take=true to execute the trade as parsed. "
+            "Set take=false to skip it. "
+            "Do not invent fills or change strike, quantity, or side."
+        ),
+        user=user_content,
+        schema=schema,
+        timeout=15,
+    )
+    return FilterDecision.model_validate(content)

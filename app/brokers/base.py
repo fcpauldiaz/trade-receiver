@@ -3,7 +3,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal, Protocol
 
-BrokerName = Literal["schwab", "tradier", "webull"]
+BrokerName = Literal["schwab", "tradier", "webull", "ninjatrader"]
 TradeMode = Literal["paper", "live"]
 
 
