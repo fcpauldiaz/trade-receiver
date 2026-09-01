@@ -11,7 +11,9 @@ class Settings(BaseSettings):
     encryption_key: str = "change-me-32-byte-key-for-tokens!!"
 
     openai_api_key: str | None = None
-    ai_model: str = "gpt-4o-mini"
+    ai_gateway_api_key: str | None = None
+    ai_gateway_base_url: str = "https://ai-gateway.vercel.sh/v1"
+    ai_model: str = "openai/gpt-4o-mini"
     ai_confidence_threshold: float = 0.8
 
     creem_api_key: str | None = None

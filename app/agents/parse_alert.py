@@ -5,11 +5,14 @@ from decimal import Decimal
 
 from app.config import settings
 from app.schemas.trade import TradeIntent
+from app.services.futures_trade import map_futures_order_payload, parse_futures_alert_rules
+from app.services.llm import chat_json_completion, llm_configured
 
 SAMPLE_ALERTS = [
     "BTO SPY 580C 6/20 @ 2.50",
     "STC QQQ 480P 07/18",
     "🚨 BUY TO OPEN AAPL 200 CALL 2025-09-19",
+    "BUY MES 1 SL 10 TP 20",
 ]
 
 MONTH_MAP = {
@@ -54,6 +57,10 @@ def _parse_expiration(token: str) -> date | None:
 
 
 def parse_alert_rules(text: str) -> TradeIntent:
+    futures = parse_futures_alert_rules(text)
+    if futures is not None:
+        return futures
+
     upper = text.upper()
     action = "skip"
     if any(k in upper for k in ("BTO", "BUY TO OPEN", "BUY")):
@@ -108,38 +115,35 @@ def parse_alert_rules(text: str) -> TradeIntent:
     )
 
 
-async def parse_alert(text: str) -> TradeIntent:
-    if settings.openai_api_key:
+async def parse_alert(text: str, body: dict | None = None) -> TradeIntent:
+    if body is not None:
+        from app.services.futures_trade import is_futures_order_payload
+
+        if is_futures_order_payload(body):
+            return map_futures_order_payload(body)
+
+    if llm_configured():
         try:
-            return await _parse_with_openai(text)
+            return await _parse_with_llm(text)
         except Exception:
             pass
     return parse_alert_rules(text)
 
 
-async def _parse_with_openai(text: str) -> TradeIntent:
-    import httpx
-
+async def _parse_with_llm(text: str) -> TradeIntent:
     schema = TradeIntent.model_json_schema()
     prompt = (
-        "Parse this options trade alert into structured JSON. "
+        "Parse this trade alert into structured JSON. "
+        "Use asset_class=future for futures symbols like ES, MES, NQ, MNQ, YM, RTY with BUY/SELL. "
+        "Use asset_class=option for options alerts with strikes and expirations. "
         "Use action skip if not a trade alert. "
-        "Include quantity (number of contracts); default to 1 if not specified in the alert.\n\n"
+        "Include quantity; default to 1 if not specified. "
+        "For futures, map BUY to buy_to_open and SELL to sell_to_close.\n\n"
         + text
     )
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
-            json={
-                "model": settings.ai_model,
-                "messages": [
-                    {"role": "system", "content": "Return only valid JSON matching the trade intent schema."},
-                    {"role": "user", "content": prompt + "\n\nSchema:\n" + json.dumps(schema)},
-                ],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-        return TradeIntent.model_validate_json(content)
+    content = await chat_json_completion(
+        system="Return only valid JSON matching the trade intent schema.",
+        user=prompt,
+        schema=schema,
+    )
+    return TradeIntent.model_validate(content)

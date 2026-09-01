@@ -90,11 +90,30 @@ Users connect brokers via the platform **Connections** page. These env vars regi
 
 Per-user access tokens and account IDs are stored encrypted in `broker_connections` — never in `.env`.
 
+**NinjaTrader** is not OAuth. Users paste an HTTPS tunnel URL to their local Trade Desky NinjaTrader bridge (`forward_url`) plus an optional outbound `webhook_secret`. Trade Desky cloud POSTs normalized futures JSON to that URL; the local bridge forwards to NT8 over localhost TCP. Account selection happens in the NT8 panel, not in the JSON payload.
+
+Example normalized futures order payload:
+
+```json
+{
+  "id": "uuid",
+  "symbol": "MES",
+  "action": "BUY",
+  "orderType": "MARKET",
+  "quantity": 1,
+  "stopLossTicks": 10,
+  "profitTargetTicks": 20
+}
+```
+
 ### Optional
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | LLM alert parsing (falls back to rules if unset) |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key (preferred for alert parsing + trade filter) |
+| `AI_GATEWAY_BASE_URL` | Gateway OpenAI-compatible base (default `https://ai-gateway.vercel.sh/v1`) |
+| `AI_MODEL` | Model id, e.g. `openai/gpt-4o-mini` for gateway or `gpt-4o-mini` for direct OpenAI |
+| `OPENAI_API_KEY` | Direct OpenAI fallback when gateway key is unset |
 | `TURSO_AUTH_TOKEN` | Remote libSQL auth (same value on Trade Desky) |
 | `WEBULL_ENABLED` | Feature flag for Webull adapter |
 
@@ -136,6 +155,13 @@ sequenceDiagram
 - `PUT /v1/me/settings` — update paper/live, sizing, caps, tickers
 - `POST /v1/me/onboarding/complete` — mark onboarding finished
 - `POST /v1/me/brokers/{broker}/test-order` — place 1-share SPY test order (follows default_mode)
+- `POST /v1/me/brokers/ninjatrader/connect` — store HTTPS forward URL + outbound bridge secret
+- `GET /v1/me/webhooks` — list inbound webhook endpoints (auth)
+- `POST /v1/me/webhooks` — create webhook (returns secret once)
+- `GET /v1/me/webhooks/{id}` — webhook metadata (auth)
+- `POST /v1/me/webhooks/{id}/rotate-secret` — rotate inbound secret (auth)
+- `DELETE /v1/me/webhooks/{id}` — delete/disable webhook (auth)
+- `POST /v1/webhooks/{webhook_id}` — public inbound alert webhook (`X-Webhook-Secret`)
 - `POST /v1/ingest` — authenticated alert ingest (desktop app Bearer token)
 
 ## Trade sizing

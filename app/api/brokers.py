@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
+from app.brokers.ninjatrader import NinjaTraderAdapter, pack_ninjatrader_credentials
 from app.brokers.schwab import SchwabAdapter
 from app.brokers.tradier import TradierAdapter
 from app.brokers.tradier_env import TradierEnvironment, normalize_tradier_environment
@@ -50,6 +51,20 @@ class TestOrderRequest(BaseModel):
     symbol: str = "SPY"
     quantity: int = 1
     side: str = "buy"
+    action: str | None = None
+    dry_run: bool | None = None
+
+
+class NinjaTraderConnectRequest(BaseModel):
+    forward_url: str
+    webhook_secret: str | None = None
+    account_label: str | None = None
+
+
+class NinjaTraderConnectResponse(BaseModel):
+    broker: str
+    status: str
+    forward_url: str
 
 
 class TestOrderResponse(BaseModel):
@@ -281,6 +296,34 @@ async def schwab_callback(code: str, state: str, db: Session = Depends(get_db)):
     return RedirectResponse(url=oauth_success_redirect("schwab"))
 
 
+@router.post("/ninjatrader/connect", response_model=NinjaTraderConnectResponse)
+def ninjatrader_connect(
+    body: NinjaTraderConnectRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not can_process_trades(user):
+        raise HTTPException(status_code=402, detail="Active subscription required")
+
+    forward_url = body.forward_url.strip()
+    if not forward_url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="forward_url must be an HTTPS URL")
+
+    creds = pack_ninjatrader_credentials(forward_url, body.webhook_secret)
+    conn = _upsert_connection(
+        db,
+        user,
+        "ninjatrader",
+        credentials=creds,
+        account_id=(body.account_label or "").strip() or None,
+    )
+    return NinjaTraderConnectResponse(
+        broker="ninjatrader",
+        status=conn.status,
+        forward_url=forward_url,
+    )
+
+
 @router.post("/{broker}/test-order", response_model=TestOrderResponse)
 async def test_broker_order(
     broker: str,
@@ -303,7 +346,29 @@ async def test_broker_order(
         raise HTTPException(status_code=400, detail=market_hours.RTH_SKIP_REASON)
 
     adapter = await get_adapter(db, conn)
-    result = await adapter.place_equity_order(body.symbol.upper(), body.quantity, body.side, mode)
+    if broker == "ninjatrader":
+        if not isinstance(adapter, NinjaTraderAdapter):
+            raise HTTPException(status_code=500, detail="Invalid NinjaTrader adapter")
+        from app.schemas.trade import ValidatedFuturesTrade
+
+        action = (body.action or body.side or "BUY").upper()
+        futures_action = "BUY" if action in {"BUY", "BTO", "BUY_TO_OPEN"} else "SELL"
+        validated = ValidatedFuturesTrade(
+            action=futures_action,
+            symbol=body.symbol.upper(),
+            quantity=max(1, body.quantity),
+            confidence=1.0,
+            rationale="broker test order",
+            broker="ninjatrader",
+            external_id=f"test-{body.symbol.lower()}",
+        )
+        result = await adapter.execute_futures_order(
+            validated,
+            mode=mode,
+            dry_run=body.dry_run if body.dry_run is not None else mode == "paper",
+        )
+    else:
+        result = await adapter.place_equity_order(body.symbol.upper(), body.quantity, body.side, mode)
     simulated = bool(result.raw_response.get("simulated"))
     if result.success:
         message = "Connection verified with simulated order" if simulated else "Test order placed successfully"

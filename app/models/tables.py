@@ -36,6 +36,7 @@ class User(Base):
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
     broker_connections: Mapped[list["BrokerConnection"]] = relationship(back_populates="user")
+    inbound_webhooks: Mapped[list["InboundWebhook"]] = relationship(back_populates="user")
     alerts: Mapped[list["InboundAlert"]] = relationship(back_populates="user")
     trades: Mapped[list["TradeExecution"]] = relationship(back_populates="user")
     review: Mapped["Review | None"] = relationship(back_populates="user", uselist=False)
@@ -85,6 +86,22 @@ class BrokerConnection(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship(back_populates="broker_connections")
+
+
+class InboundWebhook(Base):
+    __tablename__ = "inbound_webhooks"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(128), default="")
+    secret_hash: Mapped[str] = mapped_column(String(128))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="inbound_webhooks")
 
 
 class InboundAlert(Base):
