@@ -280,3 +280,54 @@ def test_ninjatrader_live_non_dry_run_blocked_outside_rth(client, monkeypatch):
     )
     assert resp.status_code == 400
     assert "regular trading hours" in resp.json()["detail"]
+
+
+def test_ninjatrader_test_order_uses_saved_forward_url(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    _connect_ninjatrader(db, user)
+    db.commit()
+    db.close()
+
+    import app.api.brokers as brokers_api
+    from app.services.option_chain import get_adapter
+
+    brokers_api.get_adapter = get_adapter
+
+    captured: dict[str, str] = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"order_id": "nt-123"}
+
+    class FakeClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            captured["url"] = url
+            return FakeResponse()
+
+    monkeypatch.setattr("app.brokers.ninjatrader.httpx.AsyncClient", lambda timeout: FakeClient())
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
+
+    resp = test_client.post(
+        "/v1/me/brokers/ninjatrader/test-order",
+        json={"symbol": "ES", "quantity": 1, "side": "buy", "dry_run": True},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["broker"] == "ninjatrader"
+    assert "forward URL is not configured" not in data["message"]
+    assert captured["url"] == "https://tunnel.example/webhook"

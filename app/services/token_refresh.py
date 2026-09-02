@@ -18,6 +18,8 @@ def _decrypt_raw(value: str | None) -> str:
 
 async def ensure_fresh_credentials(db: Session, connection: BrokerConnection) -> str:
     raw = _decrypt_raw(connection.encrypted_credentials)
+    if connection.broker == "ninjatrader":
+        return raw
     bundle = parse_credentials(raw)
     access_token = bundle.get("access_token", raw)
 

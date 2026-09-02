@@ -24,6 +24,10 @@ def _decrypt_creds(value: str | None) -> str:
 
 
 async def get_adapter(db: Session, connection: BrokerConnection) -> BrokerAdapter:
+    if connection.broker == "ninjatrader":
+        raw = _decrypt_creds(connection.encrypted_credentials)
+        return NinjaTraderAdapter.from_credentials(raw)
+
     raw = await ensure_fresh_credentials(db, connection)
     bundle = parse_credentials(raw)
     access_token = bundle.get("access_token", raw)
@@ -43,8 +47,6 @@ async def get_adapter(db: Session, connection: BrokerConnection) -> BrokerAdapte
         )
     if connection.broker == "webull":
         return WebullAdapter(access_token=access_token)
-    if connection.broker == "ninjatrader":
-        return NinjaTraderAdapter.from_credentials(raw)
     raise ValueError(f"Unsupported broker: {connection.broker}")
 
 
