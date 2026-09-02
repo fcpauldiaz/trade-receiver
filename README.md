@@ -90,9 +90,14 @@ Users connect brokers via the platform **Connections** page. These env vars regi
 
 Per-user access tokens and account IDs are stored encrypted in `broker_connections` — never in `.env`.
 
-**NinjaTrader** is not OAuth. Users paste an HTTPS tunnel URL to their local Trade Desky NinjaTrader bridge (`forward_url`) plus an optional outbound `webhook_secret`. Trade Desky cloud POSTs normalized futures JSON to that URL; the local bridge forwards to NT8 over localhost TCP. Account selection happens in the NT8 panel, not in the JSON payload.
+**NinjaTrader** supports two delivery paths:
 
-Example normalized futures order payload:
+1. **Device bridge (recommended)** — the Windows receiver opens an outbound WebSocket to Trade Desky. Pair via `POST /v1/me/devices/pair`, then connect to `{ws_url}?token={device_token}`. Orders are pushed to the user's last-seen online device. No ngrok required.
+2. **HTTPS forward URL (legacy)** — users paste an HTTPS tunnel URL (`forward_url`) plus an optional `webhook_secret`. Trade Desky cloud POSTs normalized futures JSON to that URL when no device is online.
+
+When a device is online, WSS delivery is tried first; on failure or offline, the service falls back to `forward_url` if configured.
+
+Example normalized futures order payload (same shape for WSS push and HTTP forward):
 
 ```json
 {
@@ -105,6 +110,29 @@ Example normalized futures order payload:
   "profitTargetTicks": 20
 }
 ```
+
+### NinjaTrader device bridge protocol
+
+1. `POST /v1/me/devices/pair` — response: `device_id`, `device_token` (shown once), `ws_url` (e.g. `wss://…/v1/devices/ws`; client appends `?token=`).
+2. Connect: `WS {ws_url}?token={device_token}` or `Authorization: Bearer {device_token}` on upgrade.
+3. Client → server on connect: `{"type":"hello","device_id":"…"}`.
+4. Server → client heartbeat: `{"type":"ping"}` every 30s; client replies `{"type":"pong"}`.
+5. Server → client order:
+
+```json
+{"type": "order", "id": "uuid", "payload": {"symbol": "MES", "action": "BUY", "quantity": 1}}
+```
+
+6. Client → server ack within 25s:
+
+```json
+{"type": "ack", "id": "uuid", "ok": true}
+```
+
+7. `GET /v1/me/devices` — list devices with online status (current user only).
+8. `DELETE /v1/me/devices/{id}` — revoke device token.
+
+Delivery uses **last-seen primary**: if multiple devices are online for one user, only the most recently active device receives each order. The in-memory registry requires a single uvicorn worker (current production default).
 
 ### Optional
 
@@ -156,6 +184,10 @@ sequenceDiagram
 - `POST /v1/me/onboarding/complete` — mark onboarding finished
 - `POST /v1/me/brokers/{broker}/test-order` — place 1-share SPY test order (follows default_mode)
 - `POST /v1/me/brokers/ninjatrader/connect` — store HTTPS forward URL + outbound bridge secret
+- `POST /v1/me/devices/pair` — pair NinjaTrader Windows receiver (returns device token + WSS URL)
+- `GET /v1/me/devices` — list paired devices and online status (auth)
+- `DELETE /v1/me/devices/{id}` — revoke paired device (auth)
+- `WS /v1/devices/ws?token=...` — outbound device bridge (user-scoped device token)
 - `GET /v1/me/webhooks` — list inbound webhook endpoints (auth)
 - `POST /v1/me/webhooks` — create webhook (returns secret once)
 - `GET /v1/me/webhooks/{id}` — webhook metadata (auth)

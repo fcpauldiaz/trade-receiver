@@ -39,7 +39,7 @@ async def execute_futures_trade(
         return execution
 
     dry_run = mode == "paper"
-    result = await adapter.execute_futures_order(validated, mode=mode, dry_run=dry_run)
+    result = await adapter.execute_futures_order(validated, mode=mode, dry_run=dry_run, user_id=user.id)
     status = "submitted" if result.success else "failed"
     if dry_run and result.success:
         status = "submitted"
