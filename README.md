@@ -192,7 +192,8 @@ sequenceDiagram
 - `POST /v1/me/webhooks` — create webhook (returns unguessable URL)
 - `GET /v1/me/webhooks/{id}` — webhook metadata (auth)
 - `DELETE /v1/me/webhooks/{id}` — delete/disable webhook (auth)
-- `POST /v1/webhooks/{webhook_id}` — public inbound alert webhook (auth via unguessable URL only)
+- `POST /v1/webhooks/{webhook_id}` — public inbound alert webhook (auth via unguessable URL only); each delivery is recorded in alert audit (`source=webhook`)
+- `GET /v1/me/alerts` — user-scoped alert audit (direct ingest and webhook ingest events); includes parsed `payload` JSON for display (webhook bodies capped at 256 KiB UTF-8)
 - `POST /v1/ingest` — authenticated alert ingest (desktop app Bearer token)
 
 ## Trade sizing

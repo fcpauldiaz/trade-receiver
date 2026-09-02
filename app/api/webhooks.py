@@ -8,9 +8,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models.tables import InboundWebhook, User
+from app.models.tables import InboundAlert, InboundWebhook, User
 from app.services.ingest_gate import ingest_processing_slot
-from app.services.ingest_pipeline import duplicate_response, process_inbound_alert
+from app.services.ingest_pipeline import (
+    duplicate_response,
+    process_inbound_alert,
+    resolve_idempotency_key,
+)
+from app.services.webhook_ingest_audit import record_webhook_ingest_event
 
 router = APIRouter(tags=["webhooks"])
 
@@ -116,7 +121,43 @@ async def receive_webhook(
     body = await request.json()
     async with ingest_processing_slot(user.id):
         try:
-            return await process_inbound_alert(db, user, body, webhook_id=webhook_id)
+            result = await process_inbound_alert(db, user, body, webhook_id=webhook_id)
         except IntegrityError:
             db.rollback()
-            return duplicate_response(db, user, body, webhook_id=webhook_id)
+            result = duplicate_response(db, user, body, webhook_id=webhook_id)
+        except HTTPException as exc:
+            if exc.status_code == 402:
+                key = resolve_idempotency_key(user, body, webhook_id)
+                alert = (
+                    db.query(InboundAlert)
+                    .filter_by(user_id=user.id, idempotency_key=key)
+                    .first()
+                )
+                inactive_result = {
+                    "status": "subscription_inactive",
+                    "alert_id": alert.id if alert is not None else None,
+                    "detail": exc.detail,
+                }
+                record_webhook_ingest_event(
+                    db,
+                    user_id=user.id,
+                    inbound_webhook_id=webhook_id,
+                    body=body,
+                    result=inactive_result,
+                )
+            raise
+
+    if "alert_id" not in result:
+        key = resolve_idempotency_key(user, body, webhook_id)
+        alert = db.query(InboundAlert).filter_by(user_id=user.id, idempotency_key=key).first()
+        if alert is not None:
+            result = {**result, "alert_id": alert.id}
+
+    record_webhook_ingest_event(
+        db,
+        user_id=user.id,
+        inbound_webhook_id=webhook_id,
+        body=body,
+        result=result,
+    )
+    return result
