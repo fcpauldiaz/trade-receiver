@@ -5,6 +5,10 @@ recently active online device for the user. This avoids duplicate fills when
 a user has multiple machines connected. Fan-out to all devices is intentionally
 not implemented; use one active receiver per account.
 
+Protocol (aligned with trade-desky-ninjatrader receiver):
+- Client → server: hello, pong (response to ping), ack
+- Server → client: ping, order
+
 The in-memory connection registry is process-local. Production runs a single
 uvicorn worker (see Dockerfile), so this is sufficient. For multi-worker
 deployments, replace the registry backend with Redis pub/sub.
@@ -46,6 +50,12 @@ class OrderPushResult:
     raw_response: dict[str, Any]
     error: str | None = None
     transport: str = "wss"
+
+
+def _ack_ok(ack: dict[str, Any]) -> bool:
+    if "ok" in ack:
+        return bool(ack.get("ok"))
+    return bool(ack.get("success", True))
 
 
 class DeviceBridgeRegistry:
@@ -120,9 +130,6 @@ class DeviceBridgeRegistry:
     ) -> bool:
         """Route an inbound device message. Returns True if handled."""
         if isinstance(msg, str):
-            if msg.strip().lower() in {"ping", "pong"}:
-                await self.touch(user_id, device_id)
-                return True
             try:
                 parsed = json.loads(msg)
             except json.JSONDecodeError:
@@ -132,17 +139,19 @@ class DeviceBridgeRegistry:
             msg = parsed
 
         msg_type = str(msg.get("type") or "").lower()
-        if msg_type in {"heartbeat", "pong"}:
+        if msg_type == "hello":
+            hello_device_id = str(msg.get("device_id") or "")
+            if hello_device_id and hello_device_id != device_id:
+                logger.warning(
+                    "hello device_id mismatch user=%s expected=%s got=%s",
+                    user_id,
+                    device_id,
+                    hello_device_id,
+                )
             await self.touch(user_id, device_id)
             return True
-        if msg_type == "ping":
+        if msg_type == "pong":
             await self.touch(user_id, device_id)
-            conn = self._connections.get(user_id, {}).get(device_id)
-            if conn is not None:
-                try:
-                    await conn.websocket.send_json({"type": "pong"})
-                except Exception:
-                    pass
             return True
         if msg_type != "ack":
             return False
@@ -173,7 +182,7 @@ class DeviceBridgeRegistry:
         if conn is None:
             return None
 
-        envelope = {"type": "order", "payload": payload}
+        envelope = {"type": "order", "id": order_id, "payload": payload}
         ack_future: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         if order_id:
             conn.pending_acks[order_id] = ack_future
@@ -218,7 +227,7 @@ class DeviceBridgeRegistry:
                 transport="wss",
             )
 
-        success = bool(ack.get("success", True))
+        success = _ack_ok(ack)
         ack_order_id = str(ack.get("id") or order_id or "")
         raw = ack if isinstance(ack, dict) else {"ack": ack}
         if success and ack_order_id:
@@ -226,7 +235,7 @@ class DeviceBridgeRegistry:
 
         error = None
         if not success:
-            error = str(ack.get("error") or ack.get("reason") or "device rejected order")
+            error = str(ack.get("reason") or ack.get("error") or "device rejected order")
 
         return OrderPushResult(
             success=success,
@@ -235,6 +244,19 @@ class DeviceBridgeRegistry:
             error=error,
             transport="wss",
         )
+
+    async def send_pings(self) -> None:
+        async with self._lock:
+            targets = [
+                (user_id, device_id, conn)
+                for user_id, devices in self._connections.items()
+                for device_id, conn in devices.items()
+            ]
+        for user_id, device_id, conn in targets:
+            try:
+                await conn.websocket.send_json({"type": "ping"})
+            except Exception:
+                await self.unregister(user_id, device_id)
 
     async def cleanup_stale(self) -> int:
         now = time.monotonic()
@@ -266,6 +288,7 @@ async def _cleanup_loop() -> None:
     while True:
         await asyncio.sleep(HEARTBEAT_INTERVAL_SEC)
         try:
+            await registry.send_pings()
             removed = await registry.cleanup_stale()
             if removed:
                 logger.info("device bridge removed %d stale connection(s)", removed)

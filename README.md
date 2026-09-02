@@ -92,7 +92,7 @@ Per-user access tokens and account IDs are stored encrypted in `broker_connectio
 
 **NinjaTrader** supports two delivery paths:
 
-1. **Device bridge (recommended)** — the Windows receiver opens an outbound WebSocket to Trade Desky. Pair a device via `POST /v1/me/devices/pair` (returns a one-time `device_token` and `ws_url`), then connect to `WS /v1/devices/ws?token=...`. Orders are pushed to the user's last-seen online device (one device per delivery to avoid duplicate fills). No ngrok required.
+1. **Device bridge (recommended)** — the Windows receiver opens an outbound WebSocket to Trade Desky. Pair via `POST /v1/me/devices/pair`, then connect to `{ws_url}?token={device_token}`. Orders are pushed to the user's last-seen online device. No ngrok required.
 2. **HTTPS forward URL (legacy)** — users paste an HTTPS tunnel URL (`forward_url`) plus an optional `webhook_secret`. Trade Desky cloud POSTs normalized futures JSON to that URL when no device is online.
 
 When a device is online, WSS delivery is tried first; on failure or offline, the service falls back to `forward_url` if configured.
@@ -113,26 +113,28 @@ Example normalized futures order payload (same shape for WSS push and HTTP forwa
 
 ### NinjaTrader device bridge protocol
 
-1. `POST /v1/me/devices/pair` — create device; response includes `device_id`, `device_token` (shown once), and `ws_url`.
-2. Connect: `WS /v1/devices/ws?token=<device_token>` (user-scoped token, not a shared secret).
-3. Heartbeat: send `{"type":"heartbeat"}` or plain `ping` every 30s; server replies with `{"type":"pong"}`.
-4. Inbound order envelope from server:
+1. `POST /v1/me/devices/pair` — response: `device_id`, `device_token` (shown once), `ws_url` (e.g. `wss://…/v1/devices/ws`; client appends `?token=`).
+2. Connect: `WS {ws_url}?token={device_token}` or `Authorization: Bearer {device_token}` on upgrade.
+3. Client → server on connect: `{"type":"hello","device_id":"…"}`.
+4. Server → client heartbeat: `{"type":"ping"}` every 30s; client replies `{"type":"pong"}`.
+5. Server → client order:
 
 ```json
-{"type": "order", "payload": {"id": "uuid", "symbol": "MES", "action": "BUY", "quantity": 1}}
+{"type": "order", "id": "uuid", "payload": {"symbol": "MES", "action": "BUY", "quantity": 1}}
 ```
 
-5. Device must acknowledge within 25s:
+6. Client → server ack within 25s:
 
 ```json
-{"type": "ack", "id": "uuid", "success": true}
+{"type": "ack", "id": "uuid", "ok": true}
 ```
 
-6. `GET /v1/me/devices` — list devices with online status (current user only).
-7. `DELETE /v1/me/devices/{id}` — revoke device token.
+7. `GET /v1/me/devices` — list devices with online status (current user only).
+8. `DELETE /v1/me/devices/{id}` — revoke device token.
 
 Delivery uses **last-seen primary**: if multiple devices are online for one user, only the most recently active device receives each order. The in-memory registry requires a single uvicorn worker (current production default).
 
+### Optional
 
 | Variable | Purpose |
 |----------|---------|

@@ -39,13 +39,22 @@ class DeviceStatus(BaseModel):
     revoked: bool
 
 
-def _ws_url(device_token: str) -> str:
+def ws_base_url() -> str:
     base = settings.receiver_base_url.rstrip("/")
     if base.startswith("https://"):
         base = "wss://" + base.removeprefix("https://")
     elif base.startswith("http://"):
         base = "ws://" + base.removeprefix("http://")
-    return f"{base}/v1/devices/ws?token={device_token}"
+    return f"{base}/v1/devices/ws"
+
+
+def _resolve_device_token(*, query_token: str, authorization: str) -> str:
+    token = query_token.strip()
+    if token:
+        return token
+    if authorization.lower().startswith("bearer "):
+        return authorization[7:].strip()
+    return ""
 
 
 @router.post("/v1/me/devices/pair", response_model=PairDeviceResponse)
@@ -61,7 +70,7 @@ def pair_user_device(
     return PairDeviceResponse(
         device_id=device.id,
         device_token=device_token,
-        ws_url=_ws_url(device_token),
+        ws_url=ws_base_url(),
         name=device.name,
     )
 
@@ -105,13 +114,17 @@ async def device_websocket(
 ):
     await start_device_bridge()
 
-    if not token.strip():
+    device_token = _resolve_device_token(
+        query_token=token,
+        authorization=websocket.headers.get("authorization", ""),
+    )
+    if not device_token:
         await websocket.close(code=4401, reason="missing device token")
         return
 
     db = SessionLocal()
     try:
-        device = resolve_device_by_token(db, token)
+        device = resolve_device_by_token(db, device_token)
         if device is None:
             await websocket.close(code=4401, reason="invalid or revoked device token")
             return
@@ -129,9 +142,6 @@ async def device_websocket(
     try:
         while True:
             raw = await websocket.receive_text()
-            handled = await registry.handle_incoming(user_id, device_id, raw)
-            if handled:
-                continue
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:

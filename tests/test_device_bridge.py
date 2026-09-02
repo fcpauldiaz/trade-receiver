@@ -10,15 +10,15 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.api.devices import ws_base_url
 from app.brokers.ninjatrader import NinjaTraderAdapter
 from app.database import Base, get_db
 from app.main import app
-from app.models.tables import BrokerConnection, Subscription, User, UserDevice
+from app.models.tables import BrokerConnection, Subscription, User
 from app.schemas.trade import ValidatedFuturesTrade
 from app.services.crypto import encrypt_value
 from app.services.device_bridge import registry
 from app.services.device_tokens import pair_device, resolve_device_by_token
-from app.services.jwt_auth import hash_api_key
 
 
 @pytest.fixture()
@@ -79,7 +79,7 @@ def _connect_ninjatrader(db: Session, user: User, forward_url: str = "https://tu
 
 def test_pair_device_returns_token_and_ws_url(client, db_session):
     db, _ = db_session
-    user, api_token = _seed_user(db, email="pair@example.com")
+    _, api_token = _seed_user(db, email="pair@example.com")
 
     resp = client.post(
         "/v1/me/devices/pair",
@@ -91,7 +91,8 @@ def test_pair_device_returns_token_and_ws_url(client, db_session):
     assert data["device_id"]
     assert data["device_token"].startswith("ntd_")
     assert data["name"] == "NT Workstation"
-    assert "/v1/devices/ws?token=" in data["ws_url"]
+    assert data["ws_url"] == ws_base_url()
+    assert "?token=" not in data["ws_url"]
 
 
 def test_pair_device_requires_subscription(client, db_session):
@@ -122,7 +123,7 @@ def test_list_devices_shows_online_status(client, db_session):
 
     def _device_listener():
         with client.websocket_connect(f"/v1/devices/ws?token={device_token}") as ws:
-            ws.send_json({"type": "heartbeat"})
+            ws.send_json({"type": "hello", "device_id": device.id})
             connected.set()
             time.sleep(0.5)
 
@@ -134,6 +135,19 @@ def test_list_devices_shows_online_status(client, db_session):
     resp = client.get("/v1/me/devices", headers={"Authorization": f"Bearer {api_token}"})
     assert resp.json()[0]["online"] is True
     thread.join(timeout=2)
+
+
+def test_websocket_accepts_bearer_auth(client, db_session):
+    db, _ = db_session
+    user, _ = _seed_user(db, email="bearer@example.com")
+    device, device_token = pair_device(db, user_id=user.id, name="Desk")
+
+    with client.websocket_connect(
+        "/v1/devices/ws",
+        headers={"Authorization": f"Bearer {device_token}"},
+    ) as ws:
+        ws.send_json({"type": "hello", "device_id": device.id})
+        ws.send_json({"type": "pong"})
 
 
 def test_revoke_device(client, db_session):
@@ -183,7 +197,7 @@ async def test_push_order_only_reaches_target_user(db_session):
         await registry.handle_incoming(
             user_a.id,
             "device-a",
-            {"type": "ack", "id": order_id, "success": True},
+            {"type": "ack", "id": order_id, "ok": True},
         )
 
     async def send_b(data):
@@ -202,6 +216,7 @@ async def test_push_order_only_reaches_target_user(db_session):
     assert result.success is True
     assert len(sent_a) == 1
     assert sent_a[0]["type"] == "order"
+    assert sent_a[0]["id"] == order_id
     assert sent_a[0]["payload"]["id"] == order_id
     assert len(sent_b) == 0
 
@@ -228,7 +243,7 @@ async def test_duplicate_order_id_skipped(db_session):
         await registry.handle_incoming(
             user.id,
             "device-1",
-            {"type": "ack", "id": order_id, "success": True},
+            {"type": "ack", "id": order_id, "ok": True},
         )
 
     ws.send_json = send_and_ack
@@ -242,6 +257,40 @@ async def test_duplicate_order_id_skipped(db_session):
     assert second is not None
     assert second.raw_response.get("status") == "duplicate_skipped"
     assert send_count == 1
+
+    await registry.unregister(user.id, "device-1")
+
+
+@pytest.mark.asyncio
+async def test_ack_ok_false_returns_failure(db_session):
+    db, _ = db_session
+    user, _ = _seed_user(db, email="reject@example.com")
+
+    from starlette.websockets import WebSocketState
+    from unittest.mock import AsyncMock
+
+    ws = AsyncMock()
+    ws.client_state = WebSocketState.CONNECTED
+    order_id = "reject-order"
+
+    async def send_and_ack(data):
+        await registry.handle_incoming(
+            user.id,
+            "device-1",
+            {"type": "ack", "id": order_id, "ok": False, "reason": "symbol not allowed"},
+        )
+
+    ws.send_json = send_and_ack
+    await registry.register(user.id, "device-1", ws)
+
+    result = await registry.push_order(
+        user.id,
+        {"id": order_id, "symbol": "MES", "action": "BUY", "quantity": 1},
+    )
+
+    assert result is not None
+    assert result.success is False
+    assert "symbol not allowed" in (result.error or "")
 
     await registry.unregister(user.id, "device-1")
 
@@ -311,7 +360,7 @@ async def test_adapter_uses_device_bridge_when_online(db_session):
         await registry.handle_incoming(
             user.id,
             device.id,
-            {"type": "ack", "id": order_id, "success": True},
+            {"type": "ack", "id": order_id, "ok": True},
         )
 
     ws.send_json = send_and_ack
@@ -334,6 +383,7 @@ async def test_adapter_uses_device_bridge_when_online(db_session):
     assert result.success is True
     assert len(captured) == 1
     assert captured[0]["type"] == "order"
+    assert captured[0]["id"] == order_id
     assert captured[0]["payload"]["id"] == order_id
     assert result.raw_response.get("transport") == "wss"
 
