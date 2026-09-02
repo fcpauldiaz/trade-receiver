@@ -16,8 +16,6 @@ from app.models.tables import BrokerConnection, Subscription, User
 from app.schemas.trade import TradeIntent
 from app.services.crypto import encrypt_value
 from app.services.futures_trade import is_futures_order_payload, map_futures_order_payload
-from app.services.inbound_webhook import verify_webhook_secret
-from app.services.jwt_auth import hash_api_key
 from tests.test_e2e import FakeAdapter, _seed_paid_user
 
 
@@ -56,13 +54,6 @@ def client(db_session):
     return TestClient(app)
 
 
-def test_verify_webhook_secret():
-    secret = "whsec-test"
-    digest = hash_api_key(secret)
-    assert verify_webhook_secret(secret, digest) is True
-    assert verify_webhook_secret("wrong", digest) is False
-
-
 def test_create_and_receive_webhook(client, db_session: Session):
     user, _ = _seed_paid_user(db_session)
     token = "user-api-key"
@@ -77,52 +68,23 @@ def test_create_and_receive_webhook(client, db_session: Session):
     assert create.status_code == 200
     data = create.json()
     assert data["enabled"] is True
-    assert data["secret"]
+    assert "secret" not in data
     assert data["url"].endswith(f"/v1/webhooks/{data['id']}")
-
-    bad = client.post(
-        f"/v1/webhooks/{data['id']}",
-        json={"title": "Alert", "body": "BTO SPY 580C 6/20"},
-        headers={"X-Webhook-Secret": "bad-secret"},
-    )
-    assert bad.status_code == 401
 
     ok = client.post(
         f"/v1/webhooks/{data['id']}",
         json={"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"},
-        headers={"X-Webhook-Secret": data["secret"]},
     )
     assert ok.status_code == 200
     assert ok.json()["status"] in {"filled", "skipped", "submitted", "validation_failed", "duplicate"}
 
 
-def test_rotate_webhook_secret(client, db_session: Session):
-    user, token = _seed_paid_user(db_session)
-    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
-    db_session.commit()
-
-    create = client.post(
-        "/v1/me/webhooks",
-        json={"name": "Alerts"},
-        headers={"Authorization": f"Bearer {token}"},
+def test_receive_webhook_unknown_id_returns_404(client):
+    res = client.post(
+        "/v1/webhooks/00000000-0000-0000-0000-000000000000",
+        json={"title": "Alert", "body": "BTO SPY"},
     )
-    webhook_id = create.json()["id"]
-    old_secret = create.json()["secret"]
-
-    rotate = client.post(
-        f"/v1/me/webhooks/{webhook_id}/rotate-secret",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert rotate.status_code == 200
-    new_secret = rotate.json()["secret"]
-    assert new_secret != old_secret
-
-    stale = client.post(
-        f"/v1/webhooks/{webhook_id}",
-        json={"symbol": "MES", "action": "BUY", "quantity": 1},
-        headers={"X-Webhook-Secret": old_secret},
-    )
-    assert stale.status_code == 401
+    assert res.status_code == 404
 
 
 def test_structured_futures_payload_mapping():
