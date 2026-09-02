@@ -27,10 +27,10 @@
 ### Tests
 - Run with an isolated DB: `DATABASE_URL=sqlite:///./data/test.db pytest`
   (matches CI in `.github/workflows/ci.yml`). All external services
-  (OpenAI, Vercel AI Gateway, brokers, Creem billing, Better Auth) are mocked in the suite.
+  (OpenAI, Vercel AI Gateway, brokers, Better Auth) are mocked in the suite.
 
 ### External dependencies (not needed to boot or test)
-- OpenAI / Vercel AI Gateway, Tradier/Schwab/Webull/NinjaTrader brokers, Creem billing, and the
+- OpenAI / Vercel AI Gateway, Tradier/Schwab/Webull/NinjaTrader brokers, and the
   `trade-platform` Better Auth issuer are external network services. They are
   optional for running the app and the test suite; only a full production
   auth→connect→ingest→execute flow needs real credentials.
