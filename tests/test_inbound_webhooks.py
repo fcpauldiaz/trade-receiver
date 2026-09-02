@@ -12,7 +12,7 @@ from app.brokers.ninjatrader import NinjaTraderAdapter
 from app.config import settings
 from app.database import Base, get_db
 from app.main import app
-from app.models.tables import Subscription, User
+from app.models.tables import BrokerConnection, Subscription, User
 from app.schemas.trade import TradeIntent
 from app.services.crypto import encrypt_value
 from app.services.futures_trade import is_futures_order_payload, map_futures_order_payload
@@ -268,3 +268,49 @@ def test_ninjatrader_connect_and_futures_ingest(client, db_session: Session, mon
     )
     assert res.status_code == 200
     assert res.json()["status"] == "submitted"
+
+
+def test_list_brokers_returns_ninjatrader_forward_url(client, db_session: Session):
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    forward_url = "https://tunnel.example/webhook"
+    connect = client.post(
+        "/v1/me/brokers/ninjatrader/connect",
+        json={
+            "forward_url": forward_url,
+            "webhook_secret": "bridge-secret",
+            "account_label": "Sim101",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert connect.status_code == 200
+
+    list_resp = client.get("/v1/me/brokers", headers={"Authorization": f"Bearer {token}"})
+    assert list_resp.status_code == 200
+    brokers = list_resp.json()
+    nt = next(row for row in brokers if row["broker"] == "ninjatrader")
+    assert nt["status"] == "connected"
+    assert nt["forward_url"] == forward_url
+    assert nt["account_id"] == "Sim101"
+    assert "webhook_secret" not in nt
+
+
+def test_list_brokers_bad_ninjatrader_creds_returns_none_forward_url(client, db_session: Session):
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.add(
+        BrokerConnection(
+            user_id=user.id,
+            broker="ninjatrader",
+            status="connected",
+            encrypted_credentials="not-valid-fernet",
+        )
+    )
+    db_session.commit()
+
+    list_resp = client.get("/v1/me/brokers", headers={"Authorization": f"Bearer {token}"})
+    assert list_resp.status_code == 200
+    nt = next(row for row in list_resp.json() if row["broker"] == "ninjatrader")
+    assert nt["forward_url"] is None

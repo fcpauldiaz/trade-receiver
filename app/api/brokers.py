@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import get_db
 from app.models.tables import BrokerConnection, User
 from app.services.broker_credentials import pack_credentials
-from app.services.crypto import encrypt_value
+from app.services.crypto import decrypt_value, encrypt_value
 from app.services import market_hours
 from app.services.entitlements import can_process_trades
 from app.services.oauth_state import create_oauth_state, oauth_success_redirect, verify_oauth_state
@@ -28,6 +28,7 @@ class BrokerStatus(BaseModel):
     status: str
     account_id: str | None
     environment: str | None = None
+    forward_url: str | None = None
 
 
 class DefaultBrokerRequest(BaseModel):
@@ -109,6 +110,17 @@ def _upsert_connection(
     return conn
 
 
+def _ninjatrader_forward_url(conn: BrokerConnection) -> str | None:
+    if conn.broker != "ninjatrader" or not conn.encrypted_credentials:
+        return None
+    try:
+        raw = decrypt_value(conn.encrypted_credentials)
+        adapter = NinjaTraderAdapter.from_credentials(raw)
+        return adapter.forward_url or None
+    except Exception:
+        return None
+
+
 @router.get("", response_model=list[BrokerStatus])
 def list_brokers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     rows = db.query(BrokerConnection).filter(BrokerConnection.user_id == user.id).all()
@@ -118,6 +130,7 @@ def list_brokers(user: User = Depends(get_current_user), db: Session = Depends(g
             status=r.status,
             account_id=r.account_id,
             environment=r.environment,
+            forward_url=_ninjatrader_forward_url(r),
         )
         for r in rows
     ]
