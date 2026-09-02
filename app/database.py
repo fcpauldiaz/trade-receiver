@@ -47,13 +47,24 @@ def _ensure_libsql_dialect(url: str) -> None:
         ) from exc
 
 
+def _uses_queue_pool(url: str) -> bool:
+    return not (url.startswith("sqlite") or "libsql" in url)
+
+
+def _pool_kwargs_for_url(url: str) -> dict:
+    if not _uses_queue_pool(url):
+        return {}
+    return {}
+
+
 def _build_engine():
     url = normalized_database_url()
     _ensure_libsql_dialect(url)
-    pool_kwargs: dict = {}
-    if "libsql" in url:
-        pool_kwargs = {"pool_size": 1, "max_overflow": 0}
-    return create_engine(url, connect_args=database_connect_args(), **pool_kwargs)
+    return create_engine(
+        url,
+        connect_args=database_connect_args(),
+        **_pool_kwargs_for_url(url),
+    )
 
 
 engine = _build_engine()
