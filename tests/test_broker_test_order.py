@@ -7,10 +7,30 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.brokers.ninjatrader import NinjaTraderAdapter
 from app.database import Base, get_db
 from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User
 from app.services.crypto import encrypt_value
+
+
+class FakeNinjaTraderAdapter(NinjaTraderAdapter):
+    def __init__(self) -> None:
+        super().__init__(forward_url="https://tunnel.example/webhook")
+
+    async def execute_futures_order(self, validated, *, mode: str = "paper", dry_run: bool | None = None):
+        from app.brokers.base import OrderResult
+
+        return OrderResult(
+            success=True,
+            order_id=f"nt-{validated.symbol}",
+            fill_price=None,
+            raw_response={
+                "simulated": dry_run if dry_run is not None else mode == "paper",
+                "symbol": validated.symbol,
+                "action": validated.action,
+            },
+        )
 
 
 class FakeBrokerAdapter:
@@ -165,6 +185,97 @@ def test_test_order_blocked_outside_rth(client, monkeypatch):
     resp = test_client.post(
         "/v1/me/brokers/tradier/test-order",
         json={"symbol": "SPY", "quantity": 1, "side": "buy"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400
+    assert "regular trading hours" in resp.json()["detail"]
+
+
+def _connect_ninjatrader(db, user: User) -> None:
+    db.add(
+        BrokerConnection(
+            user_id=user.id,
+            broker="ninjatrader",
+            status="connected",
+            account_id="Sim101",
+            encrypted_credentials=encrypt_value('{"forward_url":"https://tunnel.example/webhook"}'),
+        )
+    )
+
+
+def test_ninjatrader_dry_run_test_order_allowed_outside_rth(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    _connect_ninjatrader(db, user)
+    db.commit()
+    db.close()
+
+    import app.api.brokers as brokers_api
+
+    async def _fake_nt_adapter(db, conn):
+        return FakeNinjaTraderAdapter()
+
+    brokers_api.get_adapter = _fake_nt_adapter
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    resp = test_client.post(
+        "/v1/me/brokers/ninjatrader/test-order",
+        json={"symbol": "ES", "quantity": 1, "side": "buy", "dry_run": True},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["success"] is True
+    assert data["broker"] == "ninjatrader"
+    assert data["simulated"] is True
+
+
+def test_ninjatrader_paper_test_order_allowed_outside_rth(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True)
+    _connect_ninjatrader(db, user)
+    db.commit()
+    db.close()
+
+    import app.api.brokers as brokers_api
+
+    async def _fake_nt_adapter(db, conn):
+        return FakeNinjaTraderAdapter()
+
+    brokers_api.get_adapter = _fake_nt_adapter
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    resp = test_client.post(
+        "/v1/me/brokers/ninjatrader/test-order",
+        json={"symbol": "ES", "quantity": 1, "side": "buy"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["success"] is True
+
+
+def test_ninjatrader_live_non_dry_run_blocked_outside_rth(client, monkeypatch):
+    test_client, SessionLocal = client
+    db = SessionLocal()
+    user, token = _create_user(db, active=True, live=True)
+    user.default_mode = "live"
+    _connect_ninjatrader(db, user)
+    db.commit()
+    db.close()
+
+    import app.api.brokers as brokers_api
+
+    async def _fake_nt_adapter(db, conn):
+        return FakeNinjaTraderAdapter()
+
+    brokers_api.get_adapter = _fake_nt_adapter
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    resp = test_client.post(
+        "/v1/me/brokers/ninjatrader/test-order",
+        json={"symbol": "ES", "quantity": 1, "side": "buy", "dry_run": False},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400

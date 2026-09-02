@@ -342,7 +342,10 @@ async def test_broker_order(
     if mode == "live" and not user.live_trading_enabled:
         raise HTTPException(status_code=400, detail="Live trading is not enabled")
 
-    if not market_hours.is_rth():
+    skip_rth = broker == "ninjatrader" and (
+        body.dry_run is True or (body.dry_run is None and mode == "paper")
+    )
+    if not skip_rth and not market_hours.is_rth():
         raise HTTPException(status_code=400, detail=market_hours.RTH_SKIP_REASON)
 
     adapter = await get_adapter(db, conn)
