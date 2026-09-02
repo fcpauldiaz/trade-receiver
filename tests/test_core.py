@@ -2,7 +2,7 @@ import pytest
 from decimal import Decimal
 
 from app.agents.parse_alert import parse_alert_rules
-from app.services.entitlements import can_process_trades, verify_creem_signature
+from app.services.entitlements import can_process_trades
 from app.services.webhook_normalize import normalize_webhook_body
 from app.models.tables import Subscription, User
 
@@ -41,11 +41,3 @@ def test_can_process_trades_active():
     user = User(email="a@b.com")
     user.subscription = Subscription(status="active")
     assert can_process_trades(user) is True
-
-
-def test_creem_signature():
-    secret = "test-secret"
-    payload = b'{"test": true}'
-    import hashlib, hmac
-    sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
-    assert verify_creem_signature(payload, sig, secret)

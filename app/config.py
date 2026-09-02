@@ -16,13 +16,6 @@ class Settings(BaseSettings):
     ai_model: str = "openai/gpt-4o-mini"
     ai_confidence_threshold: float = 0.8
 
-    creem_api_key: str | None = None
-    creem_webhook_secret: str | None = None
-    creem_product_id: str | None = None
-    creem_yearly_product_id: str | None = None
-    creem_success_url: str | None = None
-    creem_test_mode: bool = False
-
     environment: str = "development"
     cors_extra_origins: str | None = None
 

@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
 from app.models.tables import Subscription, User
 from app.services.desktop_assets import save_asset
+from app.services.entitlements import can_process_trades, grant_subscription
 from app.services.jwt_auth import generate_api_key, hash_api_key
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
@@ -31,6 +32,20 @@ class DeviceTokenRequest(BaseModel):
 class DeviceTokenResponse(BaseModel):
     api_key: str
     ingest_url: str
+
+
+class GrantSubscriptionRequest(BaseModel):
+    auth_id: str | None = None
+    email: EmailStr | None = None
+    status: str = Field(default="active", min_length=1, max_length=32)
+    plan_name: str = Field(default="pro", min_length=1, max_length=64)
+
+
+class GrantSubscriptionResponse(BaseModel):
+    user_id: str
+    status: str
+    plan_name: str
+    can_process_trades: bool
 
 
 def _verify_internal_secret(x_internal_secret: str = Header(..., alias="X-Internal-Secret")) -> None:
@@ -83,6 +98,33 @@ def provision_user(body: ProvisionRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return ProvisionResponse(user_id=user.id, created=True, linked=False)
+
+
+@router.post(
+    "/subscription/grant",
+    response_model=GrantSubscriptionResponse,
+    dependencies=[Depends(_verify_internal_secret)],
+)
+def grant_user_subscription(body: GrantSubscriptionRequest, db: Session = Depends(get_db)):
+    if not body.auth_id and not body.email:
+        raise HTTPException(status_code=400, detail="auth_id or email required")
+    user = _resolve_user(db, body.auth_id, body.email)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not provisioned")
+    sub = grant_subscription(
+        db,
+        user,
+        status=body.status,
+        plan_name=body.plan_name,
+        revoke_device=body.status not in {"active", "trialing"},
+    )
+    db.refresh(user)
+    return GrantSubscriptionResponse(
+        user_id=user.id,
+        status=sub.status,
+        plan_name=sub.plan_name,
+        can_process_trades=can_process_trades(user),
+    )
 
 
 @router.post("/device-token", response_model=DeviceTokenResponse, dependencies=[Depends(_verify_internal_secret)])
