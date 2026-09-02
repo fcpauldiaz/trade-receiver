@@ -189,11 +189,10 @@ sequenceDiagram
 - `DELETE /v1/me/devices/{id}` — revoke paired device (auth)
 - `WS /v1/devices/ws?token=...` — outbound device bridge (user-scoped device token)
 - `GET /v1/me/webhooks` — list inbound webhook endpoints (auth)
-- `POST /v1/me/webhooks` — create webhook (returns secret once)
+- `POST /v1/me/webhooks` — create webhook (returns unguessable URL)
 - `GET /v1/me/webhooks/{id}` — webhook metadata (auth)
-- `POST /v1/me/webhooks/{id}/rotate-secret` — rotate inbound secret (auth)
 - `DELETE /v1/me/webhooks/{id}` — delete/disable webhook (auth)
-- `POST /v1/webhooks/{webhook_id}` — public inbound alert webhook (`X-Webhook-Secret`)
+- `POST /v1/webhooks/{webhook_id}` — public inbound alert webhook (auth via unguessable URL only)
 - `POST /v1/ingest` — authenticated alert ingest (desktop app Bearer token)
 
 ## Trade sizing

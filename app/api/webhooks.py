@@ -9,10 +9,8 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models.tables import InboundWebhook, User
-from app.services.inbound_webhook import generate_webhook_secret, verify_webhook_secret
 from app.services.ingest_gate import ingest_processing_slot
 from app.services.ingest_pipeline import duplicate_response, process_inbound_alert
-from app.services.jwt_auth import hash_api_key
 
 router = APIRouter(tags=["webhooks"])
 
@@ -26,16 +24,8 @@ class WebhookSummary(BaseModel):
     updated_at: datetime
 
 
-class WebhookCreated(WebhookSummary):
-    secret: str
-
-
 class CreateWebhookRequest(BaseModel):
     name: str = Field(default="", max_length=128)
-
-
-class RotateSecretResponse(BaseModel):
-    secret: str
 
 
 def _webhook_url(webhook_id: str) -> str:
@@ -65,24 +55,21 @@ def list_webhooks(user: User = Depends(get_current_user), db: Session = Depends(
     return [_to_summary(row) for row in rows]
 
 
-@router.post("/v1/me/webhooks", response_model=WebhookCreated)
+@router.post("/v1/me/webhooks", response_model=WebhookSummary)
 def create_webhook(
     body: CreateWebhookRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    secret = generate_webhook_secret()
     row = InboundWebhook(
         user_id=user.id,
         name=body.name.strip(),
-        secret_hash=hash_api_key(secret),
         enabled=True,
     )
     db.add(row)
     db.commit()
     db.refresh(row)
-    summary = _to_summary(row)
-    return WebhookCreated(**summary.model_dump(), secret=secret)
+    return _to_summary(row)
 
 
 @router.get("/v1/me/webhooks/{webhook_id}", response_model=WebhookSummary)
@@ -95,21 +82,6 @@ def get_webhook(
     if row is None:
         raise HTTPException(status_code=404, detail="Webhook not found")
     return _to_summary(row)
-
-
-@router.post("/v1/me/webhooks/{webhook_id}/rotate-secret", response_model=RotateSecretResponse)
-def rotate_webhook_secret(
-    webhook_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    row = db.query(InboundWebhook).filter_by(id=webhook_id, user_id=user.id).first()
-    if row is None:
-        raise HTTPException(status_code=404, detail="Webhook not found")
-    secret = generate_webhook_secret()
-    row.secret_hash = hash_api_key(secret)
-    db.commit()
-    return RotateSecretResponse(secret=secret)
 
 
 @router.delete("/v1/me/webhooks/{webhook_id}")
@@ -136,10 +108,6 @@ async def receive_webhook(
     row = db.query(InboundWebhook).filter_by(id=webhook_id).first()
     if row is None or not row.enabled:
         raise HTTPException(status_code=404, detail="Webhook not found")
-
-    provided_secret = request.headers.get("X-Webhook-Secret", "")
-    if not verify_webhook_secret(provided_secret, row.secret_hash):
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
     user = db.get(User, row.user_id)
     if user is None:
