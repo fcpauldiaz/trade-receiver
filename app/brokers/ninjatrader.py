@@ -7,6 +7,35 @@ import httpx
 from app.brokers.base import BrokerAdapter, OptionContract, OrderResult, TradeMode
 from app.schemas.trade import FuturesAction, NinjaTraderOrderPayload, ValidatedFuturesTrade
 
+_ROOT_CONTINUOUS_SYMBOLS = frozenset({"ES", "MES", "NQ", "MNQ"})
+
+
+def ninjatrader_futures_symbol(symbol: str) -> str:
+    upper = symbol.upper()
+    if upper in _ROOT_CONTINUOUS_SYMBOLS:
+        return f"{upper}1!"
+    return upper
+
+
+def _forward_error_message(
+    status_code: int,
+    raw: dict[str, Any] | Any,
+    *,
+    fallback_text: str = "",
+) -> str:
+    detail: str | None = None
+    if isinstance(raw, dict):
+        for key in ("reason", "message", "detail", "error", "text"):
+            value = raw.get(key)
+            if value is not None and str(value).strip():
+                detail = str(value).strip()
+                break
+    text = detail or fallback_text.strip()
+    base = f"forward returned HTTP {status_code}"
+    if text:
+        return f"{base}: {text[:500]}"
+    return base
+
 
 class NinjaTraderAdapter:
     name = "ninjatrader"
@@ -151,12 +180,19 @@ class NinjaTraderAdapter:
                     order_id = body["id"]
                 if effective_dry_run:
                     raw = {**raw, "simulated": True, "dry_run": True}
+                error = None
+                if not success:
+                    error = _forward_error_message(
+                        resp.status_code,
+                        raw,
+                        fallback_text=resp.text,
+                    )
                 return OrderResult(
                     success=success,
                     order_id=order_id,
                     fill_price=None,
                     raw_response=raw,
-                    error=None if success else f"forward returned HTTP {resp.status_code}",
+                    error=error,
                 )
         except httpx.HTTPError as exc:
             return OrderResult(

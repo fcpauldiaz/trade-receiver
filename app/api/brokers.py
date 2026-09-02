@@ -6,7 +6,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
-from app.brokers.ninjatrader import NinjaTraderAdapter, pack_ninjatrader_credentials
+from app.brokers.ninjatrader import (
+    NinjaTraderAdapter,
+    ninjatrader_futures_symbol,
+    pack_ninjatrader_credentials,
+)
 from app.brokers.schwab import SchwabAdapter
 from app.brokers.tradier import TradierAdapter
 from app.brokers.tradier_env import TradierEnvironment, normalize_tradier_environment
@@ -369,9 +373,10 @@ async def test_broker_order(
 
         action = (body.action or body.side or "BUY").upper()
         futures_action = "BUY" if action in {"BUY", "BTO", "BUY_TO_OPEN"} else "SELL"
+        symbol = ninjatrader_futures_symbol(body.symbol)
         validated = ValidatedFuturesTrade(
             action=futures_action,
-            symbol=body.symbol.upper(),
+            symbol=symbol,
             quantity=max(1, body.quantity),
             confidence=1.0,
             rationale="broker test order",

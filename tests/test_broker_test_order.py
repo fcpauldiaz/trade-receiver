@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.brokers.ninjatrader import NinjaTraderAdapter
+from app.brokers.ninjatrader import NinjaTraderAdapter, ninjatrader_futures_symbol
 from app.database import Base, get_db
 from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User
@@ -315,6 +315,7 @@ def test_ninjatrader_test_order_uses_saved_forward_url(client, monkeypatch):
 
         async def post(self, url, headers=None, json=None):
             captured["url"] = url
+            captured["json"] = json
             return FakeResponse()
 
     monkeypatch.setattr(
@@ -334,3 +335,58 @@ def test_ninjatrader_test_order_uses_saved_forward_url(client, monkeypatch):
     assert data["broker"] == "ninjatrader"
     assert "forward URL is not configured" not in data["message"]
     assert captured["url"] == "https://tunnel.example/webhook"
+    assert captured["json"]["symbol"] == "ES1!"
+
+
+def test_ninjatrader_futures_symbol_maps_root_continuous():
+    assert ninjatrader_futures_symbol("ES") == "ES1!"
+    assert ninjatrader_futures_symbol("mes") == "MES1!"
+    assert ninjatrader_futures_symbol("NQ") == "NQ1!"
+    assert ninjatrader_futures_symbol("MNQ") == "MNQ1!"
+    assert ninjatrader_futures_symbol("ES1!") == "ES1!"
+    assert ninjatrader_futures_symbol("CL") == "CL"
+
+
+@pytest.mark.asyncio
+async def test_execute_futures_order_includes_forward_reason_on_http_error(monkeypatch):
+    class FakeResponse:
+        status_code = 400
+
+        @staticmethod
+        def json():
+            return {
+                "status": "rejected",
+                "reason": "symbol 'ES' / ntSymbol 'None' is not in AllowedSymbols.",
+            }
+
+        text = '{"status":"rejected","reason":"symbol \'ES\' / ntSymbol \'None\' is not in AllowedSymbols."}'
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            return FakeResponse()
+
+    monkeypatch.setattr("app.brokers.ninjatrader.httpx.AsyncClient", lambda timeout: FakeClient())
+
+    from app.schemas.trade import ValidatedFuturesTrade
+
+    adapter = NinjaTraderAdapter(forward_url="https://tunnel.example/webhook")
+    validated = ValidatedFuturesTrade(
+        action="BUY",
+        symbol="ES",
+        quantity=1,
+        confidence=1.0,
+        rationale="test",
+        broker="ninjatrader",
+        external_id="order-123",
+    )
+    result = await adapter.execute_futures_order(validated, mode="paper", dry_run=True)
+    assert result.success is False
+    assert result.error is not None
+    assert "forward returned HTTP 400" in result.error
+    assert "not in AllowedSymbols" in result.error
