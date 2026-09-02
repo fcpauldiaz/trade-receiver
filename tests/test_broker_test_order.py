@@ -304,7 +304,7 @@ def test_ninjatrader_test_order_uses_saved_forward_url(client, monkeypatch):
             return {"order_id": "nt-123"}
 
     class FakeClient:
-        def __init__(self, timeout):
+        def __init__(self, *args, **kwargs):
             pass
 
         async def __aenter__(self):
@@ -317,7 +317,10 @@ def test_ninjatrader_test_order_uses_saved_forward_url(client, monkeypatch):
             captured["url"] = url
             return FakeResponse()
 
-    monkeypatch.setattr("app.brokers.ninjatrader.httpx.AsyncClient", lambda timeout: FakeClient())
+    monkeypatch.setattr(
+        "app.brokers.ninjatrader.httpx.AsyncClient",
+        lambda *args, **kwargs: FakeClient(),
+    )
     monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
 
     resp = test_client.post(
