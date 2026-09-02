@@ -387,6 +387,7 @@ async def test_broker_order(
             validated,
             mode=mode,
             dry_run=body.dry_run if body.dry_run is not None else mode == "paper",
+            user_id=user.id,
         )
     else:
         result = await adapter.place_equity_order(body.symbol.upper(), body.quantity, body.side, mode)

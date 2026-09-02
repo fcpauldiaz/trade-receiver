@@ -6,7 +6,6 @@ import httpx
 
 from app.brokers.base import BrokerAdapter, OptionContract, OrderResult, TradeMode
 from app.schemas.trade import FuturesAction, NinjaTraderOrderPayload, ValidatedFuturesTrade
-
 _ROOT_CONTINUOUS_SYMBOLS = frozenset({"ES", "MES", "NQ", "MNQ"})
 
 
@@ -148,8 +147,29 @@ class NinjaTraderAdapter:
         *,
         mode: TradeMode = "paper",
         dry_run: bool | None = None,
+        user_id: str | None = None,
     ) -> OrderResult:
+        effective_dry_run = dry_run if dry_run is not None else mode == "paper"
+        body = self.build_order_payload(validated, dry_run=effective_dry_run)
+
+        if user_id:
+            wss_result = await self._execute_via_device_bridge(user_id, body, effective_dry_run)
+            if wss_result is not None:
+                if wss_result.success or not self.forward_url:
+                    return wss_result
+
         if not self.forward_url:
+            if user_id:
+                from app.services.device_bridge import registry
+
+                if registry.has_online_devices(user_id):
+                    return OrderResult(
+                        success=False,
+                        order_id=body.get("id"),
+                        fill_price=None,
+                        raw_response={},
+                        error="NinjaTrader device bridge delivery failed and no forward URL is configured",
+                    )
             return OrderResult(
                 success=False,
                 order_id=None,
@@ -158,8 +178,40 @@ class NinjaTraderAdapter:
                 error="NinjaTrader forward URL is not configured",
             )
 
-        effective_dry_run = dry_run if dry_run is not None else mode == "paper"
-        body = self.build_order_payload(validated, dry_run=effective_dry_run)
+        return await self._execute_via_forward_url(body, effective_dry_run)
+
+    async def _execute_via_device_bridge(
+        self,
+        user_id: str,
+        body: dict[str, Any],
+        effective_dry_run: bool,
+    ) -> OrderResult | None:
+        from app.services.device_bridge import registry
+
+        if not registry.has_online_devices(user_id):
+            return None
+
+        push_result = await registry.push_order(user_id, body)
+        if push_result is None:
+            return None
+
+        raw = push_result.raw_response
+        if effective_dry_run and push_result.success:
+            raw = {**raw, "simulated": True, "dry_run": True}
+
+        return OrderResult(
+            success=push_result.success,
+            order_id=push_result.order_id,
+            fill_price=None,
+            raw_response=raw,
+            error=push_result.error,
+        )
+
+    async def _execute_via_forward_url(
+        self,
+        body: dict[str, Any],
+        effective_dry_run: bool,
+    ) -> OrderResult:
         headers = {"Content-Type": "application/json"}
         if self.webhook_secret:
             headers["X-Webhook-Secret"] = self.webhook_secret

@@ -18,7 +18,9 @@ class FakeNinjaTraderAdapter(NinjaTraderAdapter):
     def __init__(self) -> None:
         super().__init__(forward_url="https://tunnel.example/webhook")
 
-    async def execute_futures_order(self, validated, *, mode: str = "paper", dry_run: bool | None = None):
+    async def execute_futures_order(
+        self, validated, *, mode: str = "paper", dry_run: bool | None = None, user_id: str | None = None
+    ):
         from app.brokers.base import OrderResult
 
         return OrderResult(

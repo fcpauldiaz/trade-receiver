@@ -249,7 +249,7 @@ def test_ninjatrader_connect_and_futures_ingest(client, db_session: Session, mon
 
     monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
 
-    async def fake_execute(self, validated, *, mode="paper", dry_run=None):
+    async def fake_execute(self, validated, *, mode="paper", dry_run=None, user_id=None):
         from app.brokers.base import OrderResult
 
         return OrderResult(
