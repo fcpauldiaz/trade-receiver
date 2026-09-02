@@ -123,6 +123,9 @@ class InboundAlert(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    inbound_webhook_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("inbound_webhooks.id"), nullable=True, index=True
+    )
     idempotency_key: Mapped[str] = mapped_column(String(128), index=True)
     raw_payload: Mapped[str] = mapped_column(Text)
     normalized_text: Mapped[str] = mapped_column(Text)
@@ -132,6 +135,24 @@ class InboundAlert(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="alerts")
+
+
+class WebhookIngestEvent(Base):
+    __tablename__ = "webhook_ingest_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    inbound_webhook_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("inbound_webhooks.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(32))
+    request_payload: Mapped[str] = mapped_column(Text)
+    alert_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("inbound_alerts.id"), nullable=True
+    )
+    trade_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
 class ProcessedWebhookEvent(Base):

@@ -156,6 +156,8 @@ def test_alerts_lists_skipped_capture(ingest_client, db_session: Session, monkey
     assert item["title"] == "Alerts"
     assert "BTO SPY" in item["text"]
     assert "raw_payload" not in item
+    assert item["source"] == "ingest"
+    assert item["payload"]["title"] == "Alerts"
     assert item["trade_id"] is None
 
 

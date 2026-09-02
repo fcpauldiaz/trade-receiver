@@ -74,6 +74,7 @@ async def process_inbound_alert(
     active = can_process_trades(user)
     alert = InboundAlert(
         user_id=user.id,
+        inbound_webhook_id=webhook_id,
         idempotency_key=key,
         raw_payload=json.dumps(body),
         normalized_text=text,
