@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/trade.db"
     turso_auth_token: str | None = None
     turso_sync_url: str | None = None
+    turso_embedded_replica: bool = False
     api_secret_key: str = "change-me-in-production"
     encryption_key: str = "change-me-32-byte-key-for-tokens!!"
 
