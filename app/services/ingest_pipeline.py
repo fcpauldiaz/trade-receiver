@@ -17,7 +17,7 @@ from app.services.eterminal_signal import (
 )
 from app.services.execute_futures_trade import execute_futures_trade
 from app.services.execute_trade import execute_trade
-from app.services.futures_trade import intent_to_validated_futures
+from app.services.futures_trade import intent_to_validated_futures, is_futures_order_payload
 from app.services import market_hours
 from app.services.option_chain import get_adapter
 from app.services.validate_trade import validate_trade
@@ -25,9 +25,21 @@ from app.services.webhook_normalize import idempotency_key, normalize_webhook_bo
 
 
 def resolve_idempotency_key(user: User, body: dict, webhook_id: str | None = None) -> str:
-    _, payload = normalize_webhook_body(body)
     if is_eterminal_envelope(body):
         return eterminal_idempotency_key(user.id, body)
+    if is_futures_order_payload(body):
+        import hashlib
+
+        raw = json.dumps(
+            {"user_id": user.id, "webhook_id": webhook_id, "body": body},
+            sort_keys=True,
+            default=str,
+        )
+        key = hashlib.sha256(raw.encode()).hexdigest()
+        if webhook_id:
+            return f"{webhook_id}:{key}"
+        return key
+    _, payload = normalize_webhook_body(body)
     key = idempotency_key(user.id, payload)
     if webhook_id:
         return f"{webhook_id}:{key}"

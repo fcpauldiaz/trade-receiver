@@ -1,8 +1,8 @@
 import re
 import uuid
-from decimal import Decimal
 from typing import Any
 
+from app.brokers.ninjatrader import ninjatrader_futures_symbol
 from app.schemas.trade import FuturesAction, TradeIntent
 
 FUTURES_SYMBOLS = {
@@ -11,6 +11,7 @@ FUTURES_SYMBOLS = {
 }
 
 _STRUCTURED_ACTIONS = frozenset({"BUY", "SELL"})
+_CONTINUOUS_FUTURES_RE = re.compile(r"\b([A-Z]{2,4}\d+!)")
 
 
 def is_futures_order_payload(body: dict[str, Any]) -> bool:
@@ -23,7 +24,7 @@ def map_futures_order_payload(body: dict[str, Any]) -> TradeIntent:
     action_raw = str(body.get("action", "")).upper()
     action: FuturesAction = "BUY" if action_raw == "BUY" else "SELL"
     trade_action = "buy_to_open" if action == "BUY" else "sell_to_close"
-    symbol = str(body.get("symbol", "")).strip().upper()
+    symbol = ninjatrader_futures_symbol(str(body.get("symbol", "")).strip())
     quantity = int(body.get("quantity") or 1)
     order_type_raw = str(body.get("orderType") or body.get("order_type") or "MARKET").upper()
     order_type = "limit" if order_type_raw == "LIMIT" else "market"
@@ -57,16 +58,24 @@ def parse_futures_alert_rules(text: str) -> TradeIntent | None:
         return None
 
     symbol = ""
-    for match in re.finditer(r"\b([A-Z]{2,4})\b", upper):
-        token = match.group(1)
-        if token in FUTURES_SYMBOLS:
-            symbol = token
-            break
+    continuous = _CONTINUOUS_FUTURES_RE.search(upper)
+    if continuous is not None:
+        symbol = ninjatrader_futures_symbol(continuous.group(1))
+    if not symbol:
+        for match in re.finditer(r"\b([A-Z]{2,4})\b", upper):
+            token = match.group(1)
+            if token in FUTURES_SYMBOLS:
+                symbol = ninjatrader_futures_symbol(token)
+                break
     if not symbol:
         return None
 
     trade_action = "buy_to_open" if action == "BUY" else "sell_to_close"
     qty_match = re.search(r"\b(?:QTY|QUANTITY)\s*[:=]?\s*(\d+)\b", upper)
+    if qty_match is None:
+        qty_match = re.search(rf"{re.escape(symbol)}\s+(\d+)\b", upper)
+    if qty_match is None:
+        qty_match = re.search(r"\b(\d+)\b", upper)
     quantity = int(qty_match.group(1)) if qty_match else 1
     stop_match = re.search(r"\b(?:SL|STOP)\s*[:=]?\s*(\d+)\s*(?:TICKS?)?\b", upper)
     tp_match = re.search(r"\b(?:TP|TARGET|PT)\s*[:=]?\s*(\d+)\s*(?:TICKS?)?\b", upper)
@@ -103,7 +112,7 @@ def intent_to_validated_futures(intent: TradeIntent, broker_name: str = "ninjatr
     order_type = "LIMIT" if intent.order_type == "limit" else "MARKET"
     return ValidatedFuturesTrade(
         action=action,
-        symbol=intent.underlying.upper(),
+        symbol=ninjatrader_futures_symbol(intent.underlying),
         quantity=intent.quantity,
         order_type=order_type,
         stop_loss_ticks=intent.stop_loss_ticks,

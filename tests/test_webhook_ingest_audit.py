@@ -3,7 +3,7 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -12,6 +12,7 @@ from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User, WebhookIngestEvent
 from app.services.webhook_ingest_audit import (
     MAX_WEBHOOK_INGEST_PAYLOAD_BYTES,
+    _sanitize_audit_ids,
     serialize_webhook_payload,
 )
 from tests.test_e2e import FakeAdapter, _seed_paid_user
@@ -214,3 +215,72 @@ def test_serialize_webhook_payload_truncates_large_body():
     parsed = json.loads(stored)
     assert parsed["_truncated"] is True
     assert parsed["_max_bytes"] == MAX_WEBHOOK_INGEST_PAYLOAD_BYTES
+
+
+def _webhook_client_without_audit_table(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _enable_foreign_keys(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    for table in Base.metadata.sorted_tables:
+        if table.name != "webhook_ingest_events":
+            table.create(engine)
+
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    def override_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async def fake_get_adapter(db, conn):
+        return FakeAdapter()
+
+    monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
+    return TestClient(app), SessionLocal
+
+
+def test_webhook_returns_200_when_audit_table_missing(monkeypatch):
+    audit_client, SessionLocal = _webhook_client_without_audit_table(monkeypatch)
+    db = SessionLocal()
+    user, token = _seed_paid_user(db)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db.commit()
+
+    create = audit_client.post(
+        "/v1/me/webhooks",
+        json={"name": "TradingView"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    webhook_id = create.json()["id"]
+
+    res = audit_client.post(
+        f"/v1/webhooks/{webhook_id}",
+        json={"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"},
+    )
+    assert res.status_code == 200
+    assert res.json()["status"] in {"filled", "skipped", "submitted", "validation_failed"}
+    app.dependency_overrides.clear()
+
+
+def test_sanitize_audit_ids_clears_missing_references(db_session: Session):
+    result = {
+        "alert_id": "00000000-0000-0000-0000-000000000000",
+        "trade_id": "00000000-0000-0000-0000-000000000001",
+    }
+    alert_id, trade_id = _sanitize_audit_ids(db_session, result)
+    assert alert_id is None
+    assert trade_id is None

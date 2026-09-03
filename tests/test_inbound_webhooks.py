@@ -15,7 +15,11 @@ from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User
 from app.schemas.trade import TradeIntent
 from app.services.crypto import encrypt_value
-from app.services.futures_trade import is_futures_order_payload, map_futures_order_payload
+from app.services.futures_trade import (
+    is_futures_order_payload,
+    map_futures_order_payload,
+    parse_futures_alert_rules,
+)
 from tests.test_e2e import FakeAdapter, _seed_paid_user
 
 
@@ -100,7 +104,7 @@ def test_structured_futures_payload_mapping():
     assert is_futures_order_payload(body)
     intent = map_futures_order_payload(body)
     assert intent.asset_class == "future"
-    assert intent.underlying == "MES"
+    assert intent.underlying == "MES1!"
     assert intent.quantity == 2
     assert intent.stop_loss_ticks == 8
     assert intent.profit_target_ticks == 16
@@ -109,7 +113,7 @@ def test_structured_futures_payload_mapping():
 def test_parse_futures_rules():
     intent = parse_alert_rules("BUY MES 1 SL 10 TP 20")
     assert intent.asset_class == "future"
-    assert intent.underlying == "MES"
+    assert intent.underlying == "MES1!"
     assert intent.action == "buy_to_open"
     assert intent.stop_loss_ticks == 10
     assert intent.profit_target_ticks == 20
@@ -257,6 +261,116 @@ def test_list_brokers_returns_ninjatrader_forward_url(client, db_session: Sessio
     assert nt["forward_url"] == forward_url
     assert nt["account_id"] == "Sim101"
     assert "webhook_secret" not in nt
+
+
+def test_parse_futures_rules_es1_continuous_symbol():
+    intent = parse_futures_alert_rules("BUY ES1! 1")
+    assert intent is not None
+    assert intent.asset_class == "future"
+    assert intent.underlying == "ES1!"
+    assert intent.action == "buy_to_open"
+    assert intent.quantity == 1
+
+
+def test_structured_es1_payload_normalizes_symbol():
+    body = {
+        "symbol": "ES",
+        "action": "BUY",
+        "orderType": "MARKET",
+        "quantity": 1,
+    }
+    intent = map_futures_order_payload(body)
+    assert intent.underlying == "ES1!"
+
+
+def test_futures_webhook_outside_rth_returns_skipped(client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    user.default_broker = "ninjatrader"
+    from app.brokers.ninjatrader import pack_ninjatrader_credentials
+
+    db_session.add(
+        BrokerConnection(
+            user_id=user.id,
+            broker="ninjatrader",
+            status="connected",
+            encrypted_credentials=encrypt_value(pack_ninjatrader_credentials("", "bridge-secret")),
+            account_id="Sim101",
+        )
+    )
+    db_session.commit()
+
+    async def fake_get_adapter(db, conn):
+        from app.services.crypto import decrypt_value
+
+        raw = decrypt_value(conn.encrypted_credentials or "")
+        return NinjaTraderAdapter.from_credentials(raw)
+
+    monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    create = client.post(
+        "/v1/me/webhooks",
+        json={"name": "Futures"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    webhook_id = create.json()["id"]
+
+    for payload in (
+        {"title": "Alert", "body": "BUY ES1! 1"},
+        {"symbol": "ES1!", "action": "BUY", "orderType": "MARKET", "quantity": 1},
+    ):
+        res = client.post(f"/v1/webhooks/{webhook_id}", json=payload)
+        assert res.status_code == 200, res.text
+        body = res.json()
+        assert body["status"] == "skipped"
+        assert "outside regular trading hours" in body["reason"]
+        assert body.get("alert_id")
+
+
+def test_structured_futures_payloads_have_distinct_idempotency(client, db_session: Session, monkeypatch):
+    user, token = _seed_paid_user(db_session)
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    user.default_broker = "ninjatrader"
+    from app.brokers.ninjatrader import pack_ninjatrader_credentials
+
+    db_session.add(
+        BrokerConnection(
+            user_id=user.id,
+            broker="ninjatrader",
+            status="connected",
+            encrypted_credentials=encrypt_value(pack_ninjatrader_credentials("", "secret")),
+            account_id="Sim101",
+        )
+    )
+    db_session.commit()
+
+    async def fake_get_adapter(db, conn):
+        from app.services.crypto import decrypt_value
+
+        return NinjaTraderAdapter.from_credentials(decrypt_value(conn.encrypted_credentials or ""))
+
+    monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
+    monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: False)
+
+    create = client.post(
+        "/v1/me/webhooks",
+        json={"name": "Futures"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    webhook_id = create.json()["id"]
+
+    first = client.post(
+        f"/v1/webhooks/{webhook_id}",
+        json={"symbol": "ES1!", "action": "BUY", "orderType": "MARKET", "quantity": 1},
+    )
+    second = client.post(
+        f"/v1/webhooks/{webhook_id}",
+        json={"symbol": "MES1!", "action": "BUY", "orderType": "MARKET", "quantity": 1},
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["status"] != "duplicate"
 
 
 def test_list_brokers_bad_ninjatrader_creds_returns_none_forward_url(client, db_session: Session):
