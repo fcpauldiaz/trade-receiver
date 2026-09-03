@@ -4,10 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "sqlite:///./data/trade.db"
-    turso_auth_token: str | None = None
-    turso_sync_url: str | None = None
-    turso_embedded_replica: bool = False
+    database_url: str = "postgresql://trade:trade@localhost:5432/trade"
     api_secret_key: str = "change-me-in-production"
     encryption_key: str = "change-me-32-byte-key-for-tokens!!"
 

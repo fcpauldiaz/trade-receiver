@@ -1,15 +1,27 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
-from app.models.types import UnixTimestampMs
 
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+TzDateTime = DateTime(timezone=True)
 
 
 class User(Base):
@@ -31,8 +43,8 @@ class User(Base):
     risk_percent: Mapped[float] = mapped_column(Float, default=1.0)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     default_broker: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(UnixTimestampMs, server_default=func.now())
-    updated_at: Mapped[datetime | None] = mapped_column(UnixTimestampMs, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    updated_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
 
     subscription: Mapped["Subscription | None"] = relationship(back_populates="user", uselist=False)
     broker_connections: Mapped[list["BrokerConnection"]] = relationship(back_populates="user")
@@ -43,6 +55,62 @@ class User(Base):
     review: Mapped["Review | None"] = relationship(back_populates="user", uselist=False)
 
 
+class AuthSession(Base):
+    __tablename__ = "session"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    expires_at: Mapped[datetime] = mapped_column(TzDateTime)
+    token: Mapped[str] = mapped_column(Text, unique=True)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    ip_address: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+
+class Account(Base):
+    __tablename__ = "account"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    account_id: Mapped[str] = mapped_column(Text)
+    provider_id: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    access_token_expires_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    refresh_token_expires_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    scope: Mapped[str | None] = mapped_column(Text, nullable=True)
+    password: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+
+
+class Verification(Base):
+    __tablename__ = "verification"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    identifier: Mapped[str] = mapped_column(Text, index=True)
+    value: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(TzDateTime)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+
+
+class Jwks(Base):
+    __tablename__ = "jwks"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    public_key: Mapped[str] = mapped_column(Text)
+    private_key: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime)
+    expires_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+
+
 class Review(Base):
     __tablename__ = "reviews"
 
@@ -51,8 +119,10 @@ class Review(Base):
     rating: Mapped[int] = mapped_column(Integer)
     body: Mapped[str] = mapped_column(Text)
     author_name: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        TzDateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="review")
 
@@ -65,15 +135,20 @@ class Subscription(Base):
     variant_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     plan_name: Mapped[str] = mapped_column(String(64), default="free")
     status: Mapped[str] = mapped_column(String(32), default="none")
-    renews_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    renews_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        TzDateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="subscription")
 
 
 class BrokerConnection(Base):
     __tablename__ = "broker_connections"
+    __table_args__ = (
+        Index("uq_broker_connections_user_broker", "user_id", "broker", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
@@ -82,7 +157,9 @@ class BrokerConnection(Base):
     account_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     environment: Mapped[str | None] = mapped_column(String(16), nullable=True)
     encrypted_credentials: Mapped[str | None] = mapped_column(Text, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        TzDateTime, server_default=func.now(), onupdate=func.now()
+    )
 
     user: Mapped["User"] = relationship(back_populates="broker_connections")
 
@@ -94,9 +171,9 @@ class UserDevice(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(128), default="")
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    revoked_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="devices")
 
@@ -108,9 +185,9 @@ class InboundWebhook(Base):
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(128), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
+        TzDateTime, server_default=func.now(), onupdate=func.now()
     )
 
     user: Mapped["User"] = relationship(back_populates="inbound_webhooks")
@@ -118,6 +195,9 @@ class InboundWebhook(Base):
 
 class InboundAlert(Base):
     __tablename__ = "inbound_alerts"
+    __table_args__ = (
+        Index("uq_inbound_alerts_user_idempotency", "user_id", "idempotency_key", unique=True),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
@@ -130,13 +210,14 @@ class InboundAlert(Base):
     subscription_active: Mapped[bool] = mapped_column(Boolean, default=False)
     processed: Mapped[bool] = mapped_column(Boolean, default=False)
     skip_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="alerts")
 
 
 class WebhookIngestEvent(Base):
     __tablename__ = "webhook_ingest_events"
+    __table_args__ = (Index("ix_webhook_ingest_events_created_at", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
@@ -150,7 +231,7 @@ class WebhookIngestEvent(Base):
     )
     trade_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
 
 class ProcessedWebhookEvent(Base):
@@ -159,7 +240,7 @@ class ProcessedWebhookEvent(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     source: Mapped[str] = mapped_column(String(32))
     event_id: Mapped[str] = mapped_column(String(128), unique=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
 
 class TradeExecution(Base):
@@ -167,7 +248,9 @@ class TradeExecution(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
-    alert_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("inbound_alerts.id"), nullable=True)
+    alert_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("inbound_alerts.id"), nullable=True
+    )
     broker: Mapped[str] = mapped_column(String(32))
     mode: Mapped[str] = mapped_column(String(16))
     status: Mapped[str] = mapped_column(String(32))
@@ -182,6 +265,6 @@ class TradeExecution(Base):
     intent_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     broker_response_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     broker_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="trades")

@@ -3,8 +3,8 @@
 ## Cursor Cloud specific instructions
 
 `trade-receiver` is a single Python 3.12 FastAPI service (no monorepo, no
-`docker-compose`, no frontend). Standard setup/run/test commands live in
-`README.md`; the notes below only cover Cloud-specific, non-obvious details.
+frontend). Standard setup/run/test commands live in `README.md`; the notes
+below only cover Cloud-specific, non-obvious details.
 
 ### Environment
 - Dependencies are installed into a virtualenv at `.venv` (kept out of git). The
@@ -14,18 +14,20 @@
   installed at the system level (not part of the update script).
 
 ### Running the service
+- Local Postgres: `docker compose up -d db` (image `postgres:18`,
+  `postgresql://trade:trade@localhost:5432/trade`).
 - Dev server: `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
   (from repo root, venv activated). It listens on port `8000`.
-- No `.env` is required for local dev — `app/config.py` ships working defaults
-  (SQLite at `sqlite:///./data/trade.db`, `INTERNAL_API_SECRET=dev-internal-secret`).
-  The `data/` dir is auto-created; SQLite DB files are gitignored.
+- No `.env` is required for local dev if Postgres is on localhost with the
+  default URL (`INTERNAL_API_SECRET=dev-internal-secret`).
 - Alembic migrations run automatically on app startup (`upgrade head`); there is
-  no manual migration step for local dev. Current head is `014`.
+  no manual migration step for local dev. Current head is `001` (PostgreSQL
+  baseline, including Better Auth tables).
 - `GET /health` returns DB status and the current migration head — use it as a
   readiness check.
 
 ### Tests
-- Run with an isolated DB: `DATABASE_URL=sqlite:///./data/test.db pytest`
+- Run against Postgres 18: `DATABASE_URL=postgresql://trade:trade@localhost:5432/trade pytest`
   (matches CI in `.github/workflows/ci.yml`). All external services
   (OpenAI, Vercel AI Gateway, brokers, Better Auth) are mocked in the suite.
 
@@ -40,12 +42,12 @@ Provision a user with the internal secret, mint a device API key, then call an
 authenticated endpoint:
 ```bash
 curl -s -X POST localhost:8000/v1/internal/provision \
-  -H "X-Internal-Secret: dev-internal-secret" -H "Content-Type: application/json" \
-  -d '{"auth_id":"a1","email":"demo@example.com","name":"Demo"}'
+ -H "X-Internal-Secret: dev-internal-secret" -H "Content-Type: application/json" \
+ -d '{"auth_id":"a1","email":"demo@example.com","name":"Demo"}'
 # mint key
 curl -s -X POST localhost:8000/v1/internal/device-token \
-  -H "X-Internal-Secret: dev-internal-secret" -H "Content-Type: application/json" \
-  -d '{"auth_id":"a1"}'
+ -H "X-Internal-Secret: dev-internal-secret" -H "Content-Type: application/json" \
+ -d '{"auth_id":"a1"}'
 # use returned api_key
 curl -s localhost:8000/v1/me -H "Authorization: Bearer <api_key>"
 ```

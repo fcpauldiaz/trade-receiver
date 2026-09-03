@@ -1,10 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-from app.database import Base
 from app.models.tables import TradeExecution, User
 from app.services.performance import list_trades, month_bounds, performance_summary, trade_cashflow
 
@@ -24,7 +19,7 @@ def _trade(**kwargs) -> TradeExecution:
         fill_price=14.0,
         pnl=None,
         intent_json='{"action":"buy_to_open"}',
-        created_at=datetime(2026, 7, 28, 15, 5, 20),
+        created_at=datetime(2026, 7, 28, 15, 5, 20, tzinfo=timezone.utc),
     )
     defaults.update(kwargs)
     return TradeExecution(**defaults)
@@ -47,29 +42,21 @@ def test_trade_cashflow_ignores_non_filled():
 
 def test_month_bounds_are_half_open_and_cross_years():
     start, end = month_bounds("2026-08")
-    assert start == datetime(2026, 8, 1)
-    assert end == datetime(2026, 9, 1)
+    assert start == datetime(2026, 8, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 9, 1, tzinfo=timezone.utc)
     start, end = month_bounds("2025-12")
-    assert start == datetime(2025, 12, 1)
-    assert end == datetime(2026, 1, 1)
+    assert start == datetime(2025, 12, 1, tzinfo=timezone.utc)
+    assert end == datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def test_list_trades_filters_by_month():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    db = sessionmaker(bind=engine)()
-    db.add(User(id="u1", email="a@b.com"))
-    db.add(_trade(id="jul", created_at=datetime(2026, 7, 31, 23, 0, 0)))
-    db.add(_trade(id="aug", created_at=datetime(2026, 8, 1, 0, 0, 0), pnl=10))
-    db.add(_trade(id="sep", created_at=datetime(2026, 9, 1, 0, 0, 0), pnl=5))
-    db.commit()
-    rows = list_trades(db, "u1", month="2026-08")
+def test_list_trades_filters_by_month(db_session):
+    db_session.add(User(id="u1", email="a@b.com"))
+    db_session.add(_trade(id="jul", created_at=datetime(2026, 7, 31, 23, 0, 0, tzinfo=timezone.utc)))
+    db_session.add(_trade(id="aug", created_at=datetime(2026, 8, 1, 0, 0, 0, tzinfo=timezone.utc), pnl=10))
+    db_session.add(_trade(id="sep", created_at=datetime(2026, 9, 1, 0, 0, 0, tzinfo=timezone.utc), pnl=5))
+    db_session.commit()
+    rows = list_trades(db_session, "u1", month="2026-08")
     assert [row.id for row in rows] == ["aug"]
-    db.close()
 
 
 def test_performance_summary_open_not_counted_as_loss():

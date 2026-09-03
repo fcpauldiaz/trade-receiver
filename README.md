@@ -6,18 +6,21 @@ FastAPI alert ingest service with AI trade parsing, Creem subscription gating, a
 
 ```bash
 cd trade-receiver
+docker compose up -d db
 pip install -e ".[dev]"
 uvicorn app.main:app --reload
 ```
 
-Database defaults to `sqlite:///./data/trade.db` for local dev. For **Turso**, set:
+Database defaults to `postgresql://trade:trade@localhost:5432/trade`. SQLAlchemy rewrites that to `postgresql+psycopg://`. Alembic creates the schema (including Better Auth tables) on startup.
+
+To copy an existing Turso/SQLite database:
 
 ```bash
-DATABASE_URL=libsql://your-db-name-org.turso.io
-TURSO_AUTH_TOKEN=your-token
+pip install -e ".[migrate]"
+SOURCE_DATABASE_URL=libsql://your-db-org.turso.io TURSO_AUTH_TOKEN=... \
+  DATABASE_URL=postgresql://trade:trade@localhost:5432/trade \
+  python scripts/migrate_turso_to_postgres.py
 ```
-
-The app converts `libsql://` to SQLAlchemy's `sqlite+libsql://` form automatically.
 
 ## Deploy on Coolify (Dockerfile)
 
@@ -32,18 +35,13 @@ Use the repo **Dockerfile** — do not use Nixpacks.
 | Port | `8000` |
 | Start command | leave empty (uses image `CMD`) |
 
-Set production env vars (see `.env.example`). For Turso:
+Set production env vars (see `.env.example`). Both Trade Desky apps must use the **same** PostgreSQL URL:
 
 | Variable | Example |
 |----------|---------|
-| `DATABASE_URL` | `libsql://your-db-org.turso.io` |
-| `TURSO_AUTH_TOKEN` | token from `turso db tokens create` |
+| `DATABASE_URL` | `postgresql://trade:...@host:5432/trade` |
 
-If you also set `TURSO_SYNC_URL` with a local `sqlite+libsql:///…` `DATABASE_URL`, the app defaults to **remote-only** Turso (avoids libsql embedded-replica Rust panics under concurrent webhook traffic). Set `TURSO_EMBEDDED_REPLICA=true` only if you explicitly need a local replica.
-
-On startup the service logs `database runtime config` with `embedded_replica` and `sync_url_configured` so you can confirm Coolify env (check container logs after deploy). Named SQL placeholders are forced to positional `?` before reaching libsql.
-
-No `/app/data` volume is required for remote Turso **except** desktop installers. Coolify mounts `/app/data/desktop` so Sparkle/WinSparkle assets survive redeploys.
+No `/app/data` volume is required for Postgres **except** desktop installers. Coolify mounts `/app/data/desktop` so Sparkle/WinSparkle assets survive redeploys.
 
 ```bash
 docker build -t trade-receiver .
@@ -58,7 +56,7 @@ Copy `.env.example` to `.env`. Variables fall into three groups:
 
 | Variable | Purpose |
 |----------|---------|
-| `DATABASE_URL` | libSQL/SQLite connection (shared with Trade Desky auth tables) |
+| `DATABASE_URL` | PostgreSQL 18 connection (shared with Trade Desky auth tables) |
 | `API_SECRET_KEY` | Signs OAuth state tokens |
 | `ENCRYPTION_KEY` | Encrypts per-user broker tokens at rest |
 | `RECEIVER_BASE_URL` | Public API URL (ingest + OAuth callbacks) |
@@ -217,7 +215,7 @@ alembic revision --autogenerate -m "describe change"
 ## Tests
 
 ```bash
-DATABASE_URL=sqlite:///./data/test.db pytest
+DATABASE_URL=postgresql://trade:trade@localhost:5432/trade pytest
 ```
 
 ## Related repos

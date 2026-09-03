@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -6,13 +6,19 @@ from sqlalchemy.orm import Session
 from app.models.tables import TradeExecution
 
 
+def as_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def month_bounds(month: str) -> tuple[datetime, datetime]:
     year, mon = map(int, month.split("-"))
-    start = datetime(year, mon, 1)
+    start = datetime(year, mon, 1, tzinfo=timezone.utc)
     if mon == 12:
-        end = datetime(year + 1, 1, 1)
+        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
     else:
-        end = datetime(year, mon + 1, 1)
+        end = datetime(year, mon + 1, 1, tzinfo=timezone.utc)
     return start, end
 
 
@@ -37,17 +43,13 @@ def list_trades(
         stmt = stmt.where(TradeExecution.created_at >= start, TradeExecution.created_at < end)
     else:
         if from_dt:
-            stmt = stmt.where(TradeExecution.created_at >= from_dt)
+            stmt = stmt.where(TradeExecution.created_at >= as_utc(from_dt))
         if to_dt:
-            if (
-                to_dt.hour == 0
-                and to_dt.minute == 0
-                and to_dt.second == 0
-                and to_dt.microsecond == 0
-            ):
-                stmt = stmt.where(TradeExecution.created_at < to_dt + timedelta(days=1))
+            bound = as_utc(to_dt)
+            if bound.hour == 0 and bound.minute == 0 and bound.second == 0 and bound.microsecond == 0:
+                stmt = stmt.where(TradeExecution.created_at < bound + timedelta(days=1))
             else:
-                stmt = stmt.where(TradeExecution.created_at <= to_dt)
+                stmt = stmt.where(TradeExecution.created_at <= bound)
     stmt = stmt.order_by(TradeExecution.created_at.desc()).limit(limit)
     return list(db.scalars(stmt))
 
@@ -78,7 +80,7 @@ def daily_pnl(db: Session, user_id: str, month: str) -> dict[str, float]:
         cash = trade_cashflow(row)
         if cash is None:
             continue
-        day = row.created_at.strftime("%Y-%m-%d")
+        day = as_utc(row.created_at).strftime("%Y-%m-%d")
         by_day[day] = round(by_day.get(day, 0.0) + cash, 2)
     return by_day
 
@@ -99,11 +101,11 @@ def performance_summary(db: Session, user_id: str) -> dict:
     wins = sum(1 for r in realized if (r.pnl or 0) > 0)
     win_rate = (wins / len(realized) * 100) if realized else 0.0
 
-    now = datetime.utcnow()
-    month_start = datetime(now.year, now.month, 1)
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
     mtd_pnl = 0.0
     for row in rows:
-        if row.created_at < month_start:
+        if as_utc(row.created_at) < month_start:
             continue
         cash = trade_cashflow(row)
         if cash is not None:

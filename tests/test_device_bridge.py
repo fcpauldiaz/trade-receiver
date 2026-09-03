@@ -6,14 +6,10 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.api.devices import ws_base_url
 from app.brokers.ninjatrader import NinjaTraderAdapter
-from app.database import Base, get_db
-from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User
 from app.schemas.trade import ValidatedFuturesTrade
 from app.services.crypto import encrypt_value
@@ -22,33 +18,16 @@ from app.services.device_tokens import pair_device, resolve_device_by_token
 
 
 @pytest.fixture()
-def db_session(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-    def override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-    monkeypatch.setattr("app.api.devices.SessionLocal", SessionLocal)
-    db = SessionLocal()
-    yield db, SessionLocal
+def db_session(db_factory, monkeypatch):
+    monkeypatch.setattr("app.api.devices.SessionLocal", db_factory)
+    db = db_factory()
+    yield db, db_factory
     db.close()
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
-def client(db_session):
-    return TestClient(app)
+def client(http_client: TestClient):
+    return http_client
 
 
 def _seed_user(db: Session, *, email: str, active: bool = True) -> tuple[User, str]:

@@ -5,12 +5,24 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: trade
+          POSTGRES_PASSWORD: trade
+          POSTGRES_DB: trade
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trade -d trade"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
-      - run: mkdir -p data
-      - run: rm -f data/test.db
-      - run: DATABASE_URL=sqlite:///./data/test.db pytest
+      - run: DATABASE_URL=postgresql://trade:trade@localhost:5432/trade pytest

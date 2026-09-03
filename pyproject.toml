@@ -14,7 +14,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "sqlalchemy>=2.0.36",
-    "libsql>=0.1.11",
+    "psycopg[binary]>=3.2.0",
     "alembic>=1.14.0",
     "pydantic[email]>=2.10.0",
     "pydantic-settings>=2.6.0",
@@ -26,6 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "httpx>=0.28.0"]
+migrate = ["sqlalchemy-libsql>=0.2.0"]
 
 [project.scripts]
 trade-receiver = "app.__main__:main"

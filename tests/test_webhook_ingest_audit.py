@@ -18,39 +18,18 @@ from app.services.webhook_ingest_audit import (
 from tests.test_e2e import FakeAdapter, _seed_paid_user
 
 
-@pytest.fixture()
-def db_session(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-    def override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-
+@pytest.fixture(autouse=True)
+def _ingest_patches(monkeypatch):
     async def fake_get_adapter(db, conn):
         return FakeAdapter()
 
     monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
     monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
-    db = SessionLocal()
-    yield db
-    db.close()
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
-def client(db_session):
-    return TestClient(app)
+def client(http_client: TestClient):
+    return http_client
 
 
 def test_webhook_ingest_recorded_in_alerts_audit(client, db_session: Session):

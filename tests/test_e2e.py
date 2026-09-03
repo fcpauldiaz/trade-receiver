@@ -5,14 +5,10 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.orm import Session
 
 from app.agents.parse_alert import SAMPLE_ALERTS, parse_alert_rules
 from app.brokers.base import OptionContract, OrderResult
-from app.database import Base, get_db
-from app.main import app
 from app.models.tables import BrokerConnection, Subscription, User
 
 
@@ -113,39 +109,18 @@ class FakeAdapter:
         )
 
 
-@pytest.fixture()
-def db_session(monkeypatch):
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-    def override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-
+@pytest.fixture(autouse=True)
+def _ingest_patches(monkeypatch):
     async def fake_get_adapter(db, conn):
         return FakeAdapter()
 
     monkeypatch.setattr("app.services.ingest_pipeline.get_adapter", fake_get_adapter)
     monkeypatch.setattr("app.services.market_hours.is_rth", lambda now=None: True)
-    db = SessionLocal()
-    yield db
-    db.close()
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
-def client(db_session: Session):
-    return TestClient(app)
+def client(http_client: TestClient):
+    return http_client
 
 
 def _seed_paid_user(db: Session) -> tuple[User, str]:

@@ -1,13 +1,8 @@
 import pytest
 from fastapi.testclient import TestClient
 from jwt import PyJWKClient, PyJWTError
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.config import settings
-from app.database import Base, get_db
-from app.main import app
 from app.models.tables import Subscription
 from app.services import jwt_auth
 from tests.db_helpers import insert_better_auth_user
@@ -17,28 +12,6 @@ from tests.jwks_helpers import AUTH_EMAIL, AUTH_USER_ID, blocked_urllib_jwks_iss
 def _reset_jwks_client() -> None:
     jwt_auth._jwks_client = None
     jwt_auth._jwks_url = None
-
-
-@pytest.fixture()
-def client():
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-    def override_get_db():
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    app.dependency_overrides[get_db] = override_get_db
-    yield TestClient(app), SessionLocal
-    app.dependency_overrides.clear()
 
 
 @pytest.fixture()
