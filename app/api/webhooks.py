@@ -1,4 +1,5 @@
 from datetime import datetime
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -15,7 +16,9 @@ from app.services.ingest_pipeline import (
     process_inbound_alert,
     resolve_idempotency_key,
 )
-from app.services.webhook_ingest_audit import record_webhook_ingest_event
+from app.services.webhook_ingest_audit import safe_record_webhook_ingest_event
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["webhooks"])
 
@@ -138,7 +141,7 @@ async def receive_webhook(
                     "alert_id": alert.id if alert is not None else None,
                     "detail": exc.detail,
                 }
-                record_webhook_ingest_event(
+                safe_record_webhook_ingest_event(
                     db,
                     user_id=user.id,
                     inbound_webhook_id=webhook_id,
@@ -146,6 +149,10 @@ async def receive_webhook(
                     result=inactive_result,
                 )
             raise
+        except Exception as exc:
+            logger.exception("webhook processing failed webhook_id=%s", webhook_id)
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     if "alert_id" not in result:
         key = resolve_idempotency_key(user, body, webhook_id)
@@ -153,7 +160,7 @@ async def receive_webhook(
         if alert is not None:
             result = {**result, "alert_id": alert.id}
 
-    record_webhook_ingest_event(
+    safe_record_webhook_ingest_event(
         db,
         user_id=user.id,
         inbound_webhook_id=webhook_id,
