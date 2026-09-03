@@ -31,7 +31,21 @@ async def test_parse_alert_persists_evaluation(client, monkeypatch):
     insert_better_auth_user(db, user_id="u-parse", email="parse@example.com", name="Parse")
     db.commit()
 
+    from app.services.agent_config import update_agent_config
+
+    update_agent_config(
+        db,
+        "parse",
+        model="openai/gpt-4o",
+        system_prompt=None,
+        user_prompt_template=None,
+        updated_by="u-parse",
+    )
+
+    seen: dict = {}
+
     async def fake_chat(**kwargs):
+        seen.update(kwargs)
         return _completion(
             TradeIntent(
                 action="buy_to_open",
@@ -48,6 +62,8 @@ async def test_parse_alert_persists_evaluation(client, monkeypatch):
 
     intent = await parse_alert("BTO SPY", db=db, user_id="u-parse", alert_id=None)
     assert intent.underlying == "SPY"
+    assert seen.get("model") == "openai/gpt-4o"
+    assert "BTO SPY" in seen.get("user", "")
 
     rows = db.query(AiEvaluation).filter_by(user_id="u-parse", kind="parse").all()
     assert len(rows) == 1
@@ -67,7 +83,21 @@ async def test_filter_persists_skip_evaluation(client, monkeypatch):
     user.trade_filter_prompt = "skip calls"
     db.commit()
 
+    from app.services.agent_config import update_agent_config
+
+    update_agent_config(
+        db,
+        "filter",
+        model="openai/gpt-4.1-mini",
+        system_prompt=None,
+        user_prompt_template=None,
+        updated_by="u-filter",
+    )
+
+    seen: dict = {}
+
     async def fake_chat(**kwargs):
+        seen.update(kwargs)
         return _completion({"take": False, "reason": "skip calls"})
 
     monkeypatch.setattr("app.agents.filter_trade.llm_configured", lambda: True)
@@ -85,6 +115,7 @@ async def test_filter_persists_skip_evaluation(client, monkeypatch):
     )
     out = await apply_trade_filter(intent, user, db=db)
     assert out.action == "skip"
+    assert seen.get("model") == "openai/gpt-4.1-mini"
 
     rows = db.query(AiEvaluation).filter_by(user_id="u-filter", kind="filter").all()
     assert len(rows) == 1

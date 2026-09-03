@@ -17,6 +17,7 @@ from app.database import Base, SessionLocal, engine, get_db
 from app.main import app
 from app.models import tables as _tables  # noqa: F401
 from app.config import settings
+from app.services.agent_config import invalidate_agent_config_cache
 
 settings.openai_api_key = None
 settings.ai_gateway_api_key = None
@@ -37,6 +38,7 @@ def _truncate_tables():
         quoted = ", ".join(f'"{table.name}"' for table in Base.metadata.sorted_tables)
         if quoted:
             conn.execute(text(f"TRUNCATE TABLE {quoted} RESTART IDENTITY CASCADE"))
+    invalidate_agent_config_cache()
     yield
     app.dependency_overrides.clear()
 

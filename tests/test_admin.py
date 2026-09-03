@@ -115,3 +115,50 @@ def test_non_admin_forbidden(non_admin_api):
     me = http.get("/v1/me", headers=headers)
     assert me.status_code == 200
     assert me.json()["role"] == "user"
+
+
+def test_admin_agents_list_and_update(admin_api):
+    http, headers = admin_api
+    listed = http.get("/v1/admin/agents", headers=headers)
+    assert listed.status_code == 200, listed.text
+    body = listed.json()
+    assert {row["agent_key"] for row in body} == {"parse", "filter"}
+    parse = next(row for row in body if row["agent_key"] == "parse")
+    assert parse["model_overridden"] is False
+    assert "{alert_text}" in parse["default_user_prompt_template"]
+
+    updated = http.put(
+        "/v1/admin/agents/parse",
+        headers=headers,
+        json={
+            "model": "openai/gpt-4o",
+            "system_prompt": "Return JSON only.",
+            "user_prompt_template": "Parse:\n{alert_text}",
+        },
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["model"] == "openai/gpt-4o"
+    assert updated.json()["model_overridden"] is True
+    assert updated.json()["system_prompt"] == "Return JSON only."
+
+    bad = http.put(
+        "/v1/admin/agents/parse",
+        headers=headers,
+        json={"user_prompt_template": "missing placeholder"},
+    )
+    assert bad.status_code == 400
+
+    reset = http.put(
+        "/v1/admin/agents/parse",
+        headers=headers,
+        json={"reset": True},
+    )
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["model_overridden"] is False
+    assert reset.json()["system_prompt_overridden"] is False
+
+
+def test_admin_agents_unknown_key(admin_api):
+    http, headers = admin_api
+    resp = http.put("/v1/admin/agents/unknown", headers=headers, json={"reset": True})
+    assert resp.status_code == 404

@@ -80,23 +80,21 @@ async def _filter_with_llm(
     user_id: str | None = None,
     alert_id: str | None = None,
 ) -> FilterDecision:
-    user_content = (
-        "User rules:\n"
-        f"{prompt}\n\n"
-        "Parsed trade intent (do not change strike, quantity, or side; only decide take or skip):\n"
-        f"{json.dumps(_compact_intent(intent))}"
+    from app.services.agent_config import get_agent_config, render_user_prompt
+
+    config = get_agent_config(db, "filter")
+    user_content = render_user_prompt(
+        config.user_prompt_template,
+        user_rules=prompt,
+        intent_json=json.dumps(_compact_intent(intent)),
     )
     try:
         completion = await chat_json_completion(
-            system=(
-                "Follow the user's trading rules and return only JSON. "
-                "Set take=true to execute the trade as parsed. "
-                "Set take=false to skip it. "
-                "Do not invent fills or change strike, quantity, or side."
-            ),
+            system=config.system_prompt,
             user=user_content,
             output_type=FilterDecision,
             timeout=15,
+            model=config.model,
         )
     except Exception as exc:
         record_ai_evaluation(

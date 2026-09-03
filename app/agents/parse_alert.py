@@ -145,20 +145,16 @@ async def _parse_with_llm(
     user_id: str | None = None,
     alert_id: str | None = None,
 ) -> TradeIntent:
-    prompt = (
-        "Parse this trade alert into structured JSON. "
-        "Use asset_class=future for futures symbols like ES, MES, NQ, MNQ, YM, RTY with BUY/SELL. "
-        "Use asset_class=option for options alerts with strikes and expirations. "
-        "Use action skip if not a trade alert. "
-        "Include quantity; default to 1 if not specified. "
-        "For futures, map BUY to buy_to_open and SELL to sell_to_close.\n\n"
-        + text
-    )
+    from app.services.agent_config import get_agent_config, render_user_prompt
+
+    config = get_agent_config(db, "parse")
+    prompt = render_user_prompt(config.user_prompt_template, alert_text=text)
     try:
         completion = await chat_json_completion(
-            system="Return only valid JSON matching the trade intent schema.",
+            system=config.system_prompt,
             user=prompt,
             output_type=TradeIntent,
+            model=config.model,
         )
     except Exception as exc:
         record_ai_evaluation(

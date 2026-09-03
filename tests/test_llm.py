@@ -92,6 +92,7 @@ async def test_chat_json_completion_extracts_usage(monkeypatch):
         system="sys",
         user="user",
         output_type=_SampleOutput,
+        model="openai/gpt-4o",
     )
     assert isinstance(result, LlmCompletion)
     assert result.content == {"take": True, "reason": "ok"}
@@ -100,3 +101,4 @@ async def test_chat_json_completion_extracts_usage(monkeypatch):
     assert result.completion_tokens == 40
     assert result.total_tokens == 140
     assert result.cost_usd > 0
+    assert llm_mod.ai.Model.call_args.kwargs["id"] == "openai/gpt-4o"

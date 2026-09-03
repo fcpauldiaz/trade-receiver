@@ -65,12 +65,12 @@ def estimate_cost_usd(
     return cost.quantize(Decimal("0.000001"))
 
 
-def _gateway_model() -> ai.Model:
+def _gateway_model(model_id: str | None = None) -> ai.Model:
     api_key = settings.ai_gateway_api_key
     if not api_key:
         raise RuntimeError("No LLM API key configured")
     provider = ai.get_provider("gateway", api_key=api_key)
-    return ai.Model(id=settings.ai_model, provider=provider)
+    return ai.Model(id=model_id or settings.ai_model, provider=provider)
 
 
 async def chat_json_completion(
@@ -79,15 +79,17 @@ async def chat_json_completion(
     user: str,
     output_type: type[OutputT],
     timeout: float = 30,
+    model: str | None = None,
 ) -> LlmCompletion:
-    model = _gateway_model()
+    requested_model = (model or "").strip() or settings.ai_model
+    gateway_model = _gateway_model(requested_model)
     messages = [
         ai.system_message(system),
         ai.user_message(user),
     ]
     started = time.perf_counter()
     async with asyncio.timeout(timeout):
-        async with ai.stream(model, messages, output_type=output_type) as stream:
+        async with ai.stream(gateway_model, messages, output_type=output_type) as stream:
             async for _ in stream:
                 pass
             parsed = stream.output
@@ -102,7 +104,7 @@ async def chat_json_completion(
     prompt_tokens = int(usage.input_tokens) if usage is not None else 0
     completion_tokens = int(usage.output_tokens) if usage is not None else 0
     total_tokens = int(usage.total_tokens) if usage is not None else prompt_tokens + completion_tokens
-    resolved_model = response_model or settings.ai_model
+    resolved_model = response_model or requested_model
 
     return LlmCompletion(
         content=parsed.model_dump(mode="json"),

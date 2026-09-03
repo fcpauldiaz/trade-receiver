@@ -302,3 +302,16 @@ class TradeExecution(Base):
     created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="trades")
+
+
+class AgentConfig(Base):
+    __tablename__ = "agent_configs"
+
+    agent_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_prompt_template: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        TzDateTime, server_default=func.now(), onupdate=func.now()
+    )
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)

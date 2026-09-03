@@ -9,8 +9,18 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from app.agents.defaults import AGENT_KEYS, AgentKey
 from app.database import get_db
 from app.models.tables import AiEvaluation, InboundAlert, Subscription, User
+from app.services.agent_config import (
+    MODEL_MAX_LEN,
+    PROMPT_MAX_LEN,
+    list_agent_configs,
+    reset_agent_config,
+    serialize_agent_config,
+    update_agent_config,
+    validate_user_prompt_template,
+)
 from app.services.alert_audit import AlertAuditItem, list_alert_audit_admin
 from app.services.entitlements import can_process_trades, grant_subscription
 from app.services.jwt_auth import verify_better_auth_jwt
@@ -114,6 +124,28 @@ class AdminRoleUpdate(BaseModel):
 class AdminRoleResult(BaseModel):
     user_id: str
     role: str
+
+
+class AdminAgentConfig(BaseModel):
+    agent_key: AgentKey
+    model: str
+    system_prompt: str
+    user_prompt_template: str
+    model_overridden: bool
+    system_prompt_overridden: bool
+    user_prompt_template_overridden: bool
+    default_model: str
+    default_system_prompt: str
+    default_user_prompt_template: str
+    updated_at: datetime | None = None
+    updated_by: str | None = None
+
+
+class AdminAgentUpdate(BaseModel):
+    model: str | None = Field(default=None, max_length=MODEL_MAX_LEN)
+    system_prompt: str | None = Field(default=None, max_length=PROMPT_MAX_LEN)
+    user_prompt_template: str | None = Field(default=None, max_length=PROMPT_MAX_LEN)
+    reset: bool = False
 
 
 def _start_of_today_utc() -> datetime:
@@ -367,3 +399,62 @@ def admin_alerts(
         from_dt=from_dt,
         to_dt=to_dt,
     )
+
+
+@router.get("/agents", response_model=list[AdminAgentConfig])
+def admin_list_agents(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    return [AdminAgentConfig.model_validate(serialize_agent_config(item)) for item in list_agent_configs(db)]
+
+
+@router.put("/agents/{agent_key}", response_model=AdminAgentConfig)
+def admin_update_agent(
+    agent_key: str,
+    body: AdminAgentUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    if agent_key not in AGENT_KEYS:
+        raise HTTPException(status_code=404, detail="Unknown agent")
+    key: AgentKey = agent_key  # type: ignore[assignment]
+
+    if body.reset:
+        resolved = reset_agent_config(db, key, updated_by=admin.id)
+        return AdminAgentConfig.model_validate(serialize_agent_config(resolved))
+
+    fields_set = body.model_fields_set
+    update_model = "model" in fields_set
+    update_system = "system_prompt" in fields_set
+    update_user = "user_prompt_template" in fields_set
+
+    if not (update_model or update_system or update_user):
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    template = body.user_prompt_template if update_user else None
+    if template is not None and template.strip():
+        errors = validate_user_prompt_template(key, template)
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    clear_model = update_model and (body.model is None or not body.model.strip())
+    clear_system = update_system and (body.system_prompt is None or not body.system_prompt.strip())
+    clear_user = update_user and (
+        body.user_prompt_template is None or not body.user_prompt_template.strip()
+    )
+
+    resolved = update_agent_config(
+        db,
+        key,
+        model=body.model if update_model and not clear_model else None,
+        system_prompt=body.system_prompt if update_system and not clear_system else None,
+        user_prompt_template=(
+            body.user_prompt_template if update_user and not clear_user else None
+        ),
+        updated_by=admin.id,
+        clear_model=clear_model,
+        clear_system_prompt=clear_system,
+        clear_user_prompt_template=clear_user,
+    )
+    return AdminAgentConfig.model_validate(serialize_agent_config(resolved))
