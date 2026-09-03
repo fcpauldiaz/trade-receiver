@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import logging
 
 from alembic.config import Config
 from alembic.script import ScriptDirectory
@@ -14,13 +15,21 @@ from app.services.migrations import run_migrations
 from app.services.production import validate_production_settings
 from app.services.device_bridge import start_device_bridge, stop_device_bridge
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    validate_production_settings()
-    log_database_runtime_config()
-    run_migrations()
-    await start_device_bridge()
+    logger.info("Application startup beginning")
+    try:
+        validate_production_settings()
+        log_database_runtime_config()
+        run_migrations()
+        await start_device_bridge()
+    except Exception:
+        logger.exception("Application startup failed")
+        raise
+    logger.info("Application startup complete")
     yield
     await stop_device_bridge()
 

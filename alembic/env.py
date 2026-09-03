@@ -2,11 +2,11 @@ from logging.config import fileConfig
 
 from alembic import context
 
-from app.database import Base, engine, normalized_database_url
+from app.database import Base, engine, engine_database_url
 from app.models import tables  # noqa: F401
 
 config = context.config
-config.set_main_option("sqlalchemy.url", normalized_database_url())
+config.set_main_option("sqlalchemy.url", engine_database_url())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
@@ -15,7 +15,7 @@ target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = normalized_database_url()
+    url = engine_database_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
