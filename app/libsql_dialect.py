@@ -49,21 +49,22 @@ def _build_connection_url(url, query, secure):
 
 class SQLiteDialect_libsql(SQLiteDialect_pysqlite):
     driver = "libsql"
+    default_paramstyle = "qmark"
     supports_statement_cache = SQLiteDialect_pysqlite.supports_statement_cache
 
     @classmethod
     def import_dbapi(cls):
-        import libsql
+        from app import libsql_dbapi
 
-        return libsql
+        return libsql_dbapi
 
     def on_connect(self):
-        import libsql
+        from app import libsql_dbapi
 
         sqlite3_connect = super().on_connect()
 
         def connect(conn):
-            if isinstance(conn, libsql.Connection):
+            if isinstance(conn, libsql_dbapi.PositionalConnection):
                 return
             return sqlite3_connect(conn)
 

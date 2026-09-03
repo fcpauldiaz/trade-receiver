@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.api import alerts, billing, brokers, desktop, devices, ingest, internal, reviews, settings as settings_api, stats, trades, users, webhooks
 from app.config import settings as app_settings
-from app.database import engine
+from app.database import engine, log_database_runtime_config
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.services.migrations import run_migrations
 from app.services.production import validate_production_settings
@@ -18,6 +18,7 @@ from app.services.device_bridge import start_device_bridge, stop_device_bridge
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     validate_production_settings()
+    log_database_runtime_config()
     run_migrations()
     await start_device_bridge()
     yield

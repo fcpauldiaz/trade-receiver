@@ -100,6 +100,19 @@ def test_build_engine_local_libsql_file(monkeypatch):
         engine.dispose()
 
 
+def test_database_runtime_summary_flags_sync_url_without_embedded_replica(monkeypatch):
+    from app.config import settings
+    from app.database import database_runtime_summary
+
+    monkeypatch.setattr(settings, "database_url", "sqlite+libsql:///./data/trade.db")
+    monkeypatch.setattr(settings, "turso_sync_url", "libsql://mydb-org.turso.io")
+    monkeypatch.setattr(settings, "turso_embedded_replica", False)
+    summary = database_runtime_summary()
+    assert summary["sync_url_configured"] is True
+    assert summary["embedded_replica"] is False
+    assert summary["engine_url"] == "sqlite+libsql://mydb-org.turso.io?secure=true"
+
+
 def test_build_engine_creates_independent_instances(monkeypatch):
     from app.config import settings
 
