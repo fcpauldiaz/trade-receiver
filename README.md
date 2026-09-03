@@ -134,10 +134,9 @@ Delivery uses **last-seen primary**: if multiple devices are online for one user
 
 | Variable | Purpose |
 |----------|---------|
-| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key (preferred for alert parsing + trade filter) |
-| `AI_GATEWAY_BASE_URL` | Gateway OpenAI-compatible base (default `https://ai-gateway.vercel.sh/v1`) |
-| `AI_MODEL` | Model id, e.g. `openai/gpt-4o-mini` for gateway or `gpt-4o-mini` for direct OpenAI |
-| `OPENAI_API_KEY` | Direct OpenAI fallback when gateway key is unset |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key (required for alert parsing + trade filter; used via AI SDK for Python) |
+| `AI_MODEL` | Gateway model id, e.g. `openai/gpt-4o-mini` |
+| `AI_PRICE_INPUT_PER_M` / `AI_PRICE_OUTPUT_PER_M` | Optional USD-per-1M-token overrides for cost estimates |
 | `TURSO_AUTH_TOKEN` | Remote libSQL auth (same value on Trade Desky) |
 | `WEBULL_ENABLED` | Feature flag for Webull adapter |
 

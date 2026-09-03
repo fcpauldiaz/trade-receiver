@@ -80,14 +80,11 @@ async def _filter_with_llm(
     user_id: str | None = None,
     alert_id: str | None = None,
 ) -> FilterDecision:
-    schema = FilterDecision.model_json_schema()
     user_content = (
         "User rules:\n"
         f"{prompt}\n\n"
         "Parsed trade intent (do not change strike, quantity, or side; only decide take or skip):\n"
-        f"{json.dumps(_compact_intent(intent))}\n\n"
-        "Schema:\n"
-        f"{json.dumps(schema)}"
+        f"{json.dumps(_compact_intent(intent))}"
     )
     try:
         completion = await chat_json_completion(
@@ -98,7 +95,7 @@ async def _filter_with_llm(
                 "Do not invent fills or change strike, quantity, or side."
             ),
             user=user_content,
-            schema=schema,
+            output_type=FilterDecision,
             timeout=15,
         )
     except Exception as exc:

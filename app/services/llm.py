@@ -1,10 +1,11 @@
-import json
+import asyncio
 import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any
+from typing import Any, TypeVar
 
-import httpx
+import ai
+from pydantic import BaseModel
 
 from app.config import settings
 
@@ -16,6 +17,8 @@ _MODEL_PRICES: dict[str, tuple[Decimal, Decimal]] = {
     "openai/gpt-4o-mini": (_DEFAULT_INPUT_PER_M, _DEFAULT_OUTPUT_PER_M),
     "gpt-4o-mini": (_DEFAULT_INPUT_PER_M, _DEFAULT_OUTPUT_PER_M),
 }
+
+OutputT = TypeVar("OutputT", bound=BaseModel)
 
 
 @dataclass(frozen=True)
@@ -31,7 +34,7 @@ class LlmCompletion:
 
 
 def llm_configured() -> bool:
-    return bool(settings.ai_gateway_api_key or settings.openai_api_key)
+    return bool(settings.ai_gateway_api_key)
 
 
 def estimate_cost_usd(
@@ -62,74 +65,56 @@ def estimate_cost_usd(
     return cost.quantize(Decimal("0.000001"))
 
 
-def _resolve_api() -> tuple[str, str, str]:
-    if settings.ai_gateway_api_key:
-        base = settings.ai_gateway_base_url.rstrip("/")
-        return (
-            f"{base}/chat/completions",
-            settings.ai_gateway_api_key,
-            settings.ai_model,
-        )
-    if settings.openai_api_key:
-        return (
-            "https://api.openai.com/v1/chat/completions",
-            settings.openai_api_key,
-            settings.ai_model.removeprefix("openai/"),
-        )
-    raise RuntimeError("No LLM API key configured")
-
-
-def _usage_ints(usage: dict[str, Any] | None) -> tuple[int, int, int]:
-    if not isinstance(usage, dict):
-        return 0, 0, 0
-    prompt = int(usage.get("prompt_tokens") or 0)
-    completion = int(usage.get("completion_tokens") or 0)
-    total = int(usage.get("total_tokens") or (prompt + completion))
-    return prompt, completion, total
+def _gateway_model() -> ai.Model:
+    api_key = settings.ai_gateway_api_key
+    if not api_key:
+        raise RuntimeError("No LLM API key configured")
+    provider = ai.get_provider("gateway", api_key=api_key)
+    return ai.Model(id=settings.ai_model, provider=provider)
 
 
 async def chat_json_completion(
     *,
     system: str,
     user: str,
-    schema: dict[str, Any],
+    output_type: type[OutputT],
     timeout: float = 30,
 ) -> LlmCompletion:
-    url, api_key, model = _resolve_api()
+    model = _gateway_model()
+    messages = [
+        ai.system_message(system),
+        ai.user_message(user),
+    ]
     started = time.perf_counter()
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        resp = await client.post(
-            url,
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user + "\n\nSchema:\n" + json.dumps(schema)},
-                ],
-                "response_format": {"type": "json_object"},
-            },
-        )
-        resp.raise_for_status()
-        body = resp.json()
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        content = body["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        if not isinstance(parsed, dict):
-            raise ValueError("LLM response was not a JSON object")
-        prompt_tokens, completion_tokens, total_tokens = _usage_ints(body.get("usage"))
-        generation_id = body.get("id")
-        return LlmCompletion(
-            content=parsed,
-            model=str(body.get("model") or model),
-            generation_id=generation_id if isinstance(generation_id, str) else None,
+    async with asyncio.timeout(timeout):
+        async with ai.stream(model, messages, output_type=output_type) as stream:
+            async for _ in stream:
+                pass
+            parsed = stream.output
+            usage = stream.usage
+            generation_id = stream._response_id
+            response_model = stream._response_model
+    latency_ms = int((time.perf_counter() - started) * 1000)
+
+    if not isinstance(parsed, BaseModel):
+        raise ValueError("LLM response was not a structured object")
+
+    prompt_tokens = int(usage.input_tokens) if usage is not None else 0
+    completion_tokens = int(usage.output_tokens) if usage is not None else 0
+    total_tokens = int(usage.total_tokens) if usage is not None else prompt_tokens + completion_tokens
+    resolved_model = response_model or settings.ai_model
+
+    return LlmCompletion(
+        content=parsed.model_dump(mode="json"),
+        model=resolved_model,
+        generation_id=generation_id if isinstance(generation_id, str) else None,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        latency_ms=latency_ms,
+        cost_usd=estimate_cost_usd(
+            model=resolved_model,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            latency_ms=latency_ms,
-            cost_usd=estimate_cost_usd(
-                model=str(body.get("model") or model),
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-            ),
-        )
+        ),
+    )

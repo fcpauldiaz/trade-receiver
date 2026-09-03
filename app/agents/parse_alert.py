@@ -145,7 +145,6 @@ async def _parse_with_llm(
     user_id: str | None = None,
     alert_id: str | None = None,
 ) -> TradeIntent:
-    schema = TradeIntent.model_json_schema()
     prompt = (
         "Parse this trade alert into structured JSON. "
         "Use asset_class=future for futures symbols like ES, MES, NQ, MNQ, YM, RTY with BUY/SELL. "
@@ -159,7 +158,7 @@ async def _parse_with_llm(
         completion = await chat_json_completion(
             system="Return only valid JSON matching the trade intent schema.",
             user=prompt,
-            schema=schema,
+            output_type=TradeIntent,
         )
     except Exception as exc:
         record_ai_evaluation(
