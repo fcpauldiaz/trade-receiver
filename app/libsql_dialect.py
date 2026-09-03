@@ -13,6 +13,8 @@ import urllib.parse
 from sqlalchemy import util
 from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 
+from app.libsql_dbapi import normalize_libsql_connect_kwargs
+
 
 def _build_connection_url(url, query, secure):
     query_str = urllib.parse.urlencode(sorted(query.items()))
@@ -100,10 +102,8 @@ class SQLiteDialect_libsql(SQLiteDialect_pysqlite):
             if connect_url != ":memory:":
                 connect_url = os.path.abspath(connect_url)
 
-        if "check_same_thread" in libsql_opts:
-            libsql_opts["_check_same_thread"] = libsql_opts.pop("check_same_thread")
-
-        libsql_opts.setdefault("_check_same_thread", not self._is_url_file_db(url))
+        libsql_opts.setdefault("check_same_thread", not self._is_url_file_db(url))
+        normalize_libsql_connect_kwargs(libsql_opts)
 
         return ([connect_url], libsql_opts)
 

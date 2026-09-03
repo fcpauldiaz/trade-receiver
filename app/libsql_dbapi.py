@@ -101,5 +101,15 @@ class PositionalConnection:
         return getattr(self._inner, name)
 
 
+def normalize_libsql_connect_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Map SQLAlchemy/pysqlite connect keys to the maintained libsql driver API."""
+    if "check_same_thread" in kwargs:
+        kwargs["_check_same_thread"] = kwargs.pop("check_same_thread")
+    if "uri" in kwargs:
+        kwargs["_uri"] = kwargs.pop("uri")
+    return kwargs
+
+
 def connect(*args: Any, **kwargs: Any) -> PositionalConnection:
+    normalize_libsql_connect_kwargs(kwargs)
     return PositionalConnection(libsql.connect(*args, **kwargs))
