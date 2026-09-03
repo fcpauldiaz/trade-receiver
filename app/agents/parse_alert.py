@@ -1,10 +1,11 @@
-import json
 import re
 from datetime import date
 from decimal import Decimal
 
-from app.config import settings
+from sqlalchemy.orm import Session
+
 from app.schemas.trade import TradeIntent
+from app.services.ai_evaluations import record_ai_evaluation
 from app.services.futures_trade import map_futures_order_payload, parse_futures_alert_rules
 from app.services.llm import chat_json_completion, llm_configured
 
@@ -115,7 +116,14 @@ def parse_alert_rules(text: str) -> TradeIntent:
     )
 
 
-async def parse_alert(text: str, body: dict | None = None) -> TradeIntent:
+async def parse_alert(
+    text: str,
+    body: dict | None = None,
+    *,
+    db: Session | None = None,
+    user_id: str | None = None,
+    alert_id: str | None = None,
+) -> TradeIntent:
     if body is not None:
         from app.services.futures_trade import is_futures_order_payload
 
@@ -124,13 +132,19 @@ async def parse_alert(text: str, body: dict | None = None) -> TradeIntent:
 
     if llm_configured():
         try:
-            return await _parse_with_llm(text)
+            return await _parse_with_llm(text, db=db, user_id=user_id, alert_id=alert_id)
         except Exception:
             pass
     return parse_alert_rules(text)
 
 
-async def _parse_with_llm(text: str) -> TradeIntent:
+async def _parse_with_llm(
+    text: str,
+    *,
+    db: Session | None = None,
+    user_id: str | None = None,
+    alert_id: str | None = None,
+) -> TradeIntent:
     schema = TradeIntent.model_json_schema()
     prompt = (
         "Parse this trade alert into structured JSON. "
@@ -141,9 +155,32 @@ async def _parse_with_llm(text: str) -> TradeIntent:
         "For futures, map BUY to buy_to_open and SELL to sell_to_close.\n\n"
         + text
     )
-    content = await chat_json_completion(
-        system="Return only valid JSON matching the trade intent schema.",
-        user=prompt,
-        schema=schema,
+    try:
+        completion = await chat_json_completion(
+            system="Return only valid JSON matching the trade intent schema.",
+            user=prompt,
+            schema=schema,
+        )
+    except Exception as exc:
+        record_ai_evaluation(
+            db,
+            user_id=user_id,
+            alert_id=alert_id,
+            kind="parse",
+            decision="error",
+            rationale=str(exc)[:500],
+        )
+        raise
+    intent = TradeIntent.model_validate(completion.content)
+    decision = "skip" if intent.action == "skip" else "take"
+    record_ai_evaluation(
+        db,
+        user_id=user_id,
+        alert_id=alert_id,
+        kind="parse",
+        decision=decision,
+        rationale=intent.rationale,
+        output=completion.content,
+        completion=completion,
     )
-    return TradeIntent.model_validate(content)
+    return intent

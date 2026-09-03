@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     ai_gateway_base_url: str = "https://ai-gateway.vercel.sh/v1"
     ai_model: str = "openai/gpt-4o-mini"
     ai_confidence_threshold: float = 0.8
+    ai_price_input_per_m: float | None = None
+    ai_price_output_per_m: float | None = None
 
     environment: str = "development"
     cors_extra_origins: str | None = None

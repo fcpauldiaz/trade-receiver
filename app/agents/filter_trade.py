@@ -1,10 +1,11 @@
 import json
 
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models.tables import User
 from app.schemas.trade import TradeIntent
+from app.services.ai_evaluations import record_ai_evaluation
 from app.services.llm import chat_json_completion, llm_configured
 
 SKIP_REASON_MAX = 255
@@ -47,7 +48,13 @@ def _skip(intent: TradeIntent, reason: str) -> TradeIntent:
     return intent.model_copy(update={"action": "skip", "rationale": text[:SKIP_REASON_MAX]})
 
 
-async def apply_trade_filter(intent: TradeIntent, user: User) -> TradeIntent:
+async def apply_trade_filter(
+    intent: TradeIntent,
+    user: User,
+    *,
+    db: Session | None = None,
+    alert_id: str | None = None,
+) -> TradeIntent:
     if intent.action == "skip":
         return intent
     prompt = _normalized_prompt(user)
@@ -56,7 +63,7 @@ async def apply_trade_filter(intent: TradeIntent, user: User) -> TradeIntent:
     if not llm_configured():
         return _skip(intent, "filter unavailable")
     try:
-        decision = await _filter_with_llm(prompt, intent)
+        decision = await _filter_with_llm(prompt, intent, db=db, user_id=user.id, alert_id=alert_id)
     except Exception:
         return _skip(intent, "filter unavailable")
     if decision.take:
@@ -65,7 +72,14 @@ async def apply_trade_filter(intent: TradeIntent, user: User) -> TradeIntent:
     return _skip(intent, reason)
 
 
-async def _filter_with_llm(prompt: str, intent: TradeIntent) -> FilterDecision:
+async def _filter_with_llm(
+    prompt: str,
+    intent: TradeIntent,
+    *,
+    db: Session | None = None,
+    user_id: str | None = None,
+    alert_id: str | None = None,
+) -> FilterDecision:
     schema = FilterDecision.model_json_schema()
     user_content = (
         "User rules:\n"
@@ -75,15 +89,37 @@ async def _filter_with_llm(prompt: str, intent: TradeIntent) -> FilterDecision:
         "Schema:\n"
         f"{json.dumps(schema)}"
     )
-    content = await chat_json_completion(
-        system=(
-            "Follow the user's trading rules and return only JSON. "
-            "Set take=true to execute the trade as parsed. "
-            "Set take=false to skip it. "
-            "Do not invent fills or change strike, quantity, or side."
-        ),
-        user=user_content,
-        schema=schema,
-        timeout=15,
+    try:
+        completion = await chat_json_completion(
+            system=(
+                "Follow the user's trading rules and return only JSON. "
+                "Set take=true to execute the trade as parsed. "
+                "Set take=false to skip it. "
+                "Do not invent fills or change strike, quantity, or side."
+            ),
+            user=user_content,
+            schema=schema,
+            timeout=15,
+        )
+    except Exception as exc:
+        record_ai_evaluation(
+            db,
+            user_id=user_id,
+            alert_id=alert_id,
+            kind="filter",
+            decision="error",
+            rationale=str(exc)[:500],
+        )
+        raise
+    decision = FilterDecision.model_validate(completion.content)
+    record_ai_evaluation(
+        db,
+        user_id=user_id,
+        alert_id=alert_id,
+        kind="filter",
+        decision="take" if decision.take else "skip",
+        rationale=decision.reason,
+        output=completion.content,
+        completion=completion,
     )
-    return FilterDecision.model_validate(content)
+    return decision

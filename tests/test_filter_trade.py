@@ -10,6 +10,7 @@ from app.agents.filter_trade import (
     UNAVAILABLE_RATIONALE,
     apply_trade_filter,
 )
+from app.config import settings
 from app.models.tables import User
 from app.schemas.trade import TradeIntent
 
@@ -50,7 +51,8 @@ async def test_empty_prompt_does_not_call_openai(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_take_true_leaves_intent_unchanged(monkeypatch):
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=True, reason="matches rules")),
@@ -64,7 +66,8 @@ async def test_take_true_leaves_intent_unchanged(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_take_false_skips_with_prefixed_reason(monkeypatch):
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=False, reason="skip calls")),
@@ -77,7 +80,8 @@ async def test_take_false_skips_with_prefixed_reason(monkeypatch):
 @pytest.mark.asyncio
 async def test_fail_closed_without_api_key(monkeypatch):
     openai = AsyncMock()
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", None)
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr("app.agents.filter_trade._filter_with_llm", openai)
     out = await apply_trade_filter(_intent(), _user(trade_filter_prompt="only puts"))
     assert out.action == "skip"
@@ -87,7 +91,8 @@ async def test_fail_closed_without_api_key(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_fail_closed_on_openai_error(monkeypatch):
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(side_effect=RuntimeError("timeout")),
@@ -99,7 +104,8 @@ async def test_fail_closed_on_openai_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_skip_reason_is_truncated(monkeypatch):
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=False, reason="x" * 500)),

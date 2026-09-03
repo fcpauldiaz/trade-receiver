@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.agents.filter_trade import FilterDecision
+from app.config import settings
 from app.models.tables import InboundAlert, Subscription, User
 from tests.test_e2e import FakeAdapter, _seed_paid_user
 
@@ -233,7 +234,8 @@ def test_ingest_skips_when_filter_rejects(ingest_client, db_session: Session, mo
     user, token = _seed_paid_user(db_session)
     user.trade_filter_prompt = "skip calls"
     db_session.commit()
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=False, reason="calls are banned")),
@@ -256,7 +258,8 @@ def test_ingest_continues_when_filter_takes(ingest_client, db_session: Session, 
     user, token = _seed_paid_user(db_session)
     user.trade_filter_prompt = "only SPY"
     db_session.commit()
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
     monkeypatch.setattr(
         "app.agents.filter_trade._filter_with_llm",
         AsyncMock(return_value=FilterDecision(take=True, reason="ok")),
@@ -275,7 +278,8 @@ def test_ingest_fail_closed_when_prompt_set_without_key(ingest_client, db_sessio
     user, token = _seed_paid_user(db_session)
     user.trade_filter_prompt = "only puts"
     db_session.commit()
-    monkeypatch.setattr("app.agents.filter_trade.settings.openai_api_key", None)
+    monkeypatch.setattr(settings, "openai_api_key", None)
+    monkeypatch.setattr(settings, "ai_gateway_api_key", None)
 
     res = ingest_client.post(
         "/v1/ingest",

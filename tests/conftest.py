@@ -24,6 +24,9 @@ settings.ai_gateway_api_key = None
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_schema():
+    from app.services.migrations import run_migrations
+
+    run_migrations()
     Base.metadata.create_all(bind=engine)
     yield
 

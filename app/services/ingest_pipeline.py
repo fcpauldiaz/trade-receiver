@@ -111,10 +111,10 @@ async def process_inbound_alert(
             db.commit()
             return {"status": "skipped", "reason": alert.skip_reason}
     else:
-        intent = await parse_alert(text, body=body)
+        intent = await parse_alert(text, body=body, db=db, user_id=user.id, alert_id=alert.id)
         intent = decide_action(intent, user)
         if intent.action != "skip":
-            intent = await apply_trade_filter(intent, user)
+            intent = await apply_trade_filter(intent, user, db=db, alert_id=alert.id)
         if intent.action == "skip":
             alert.skip_reason = intent.rationale or "skipped"
             alert.processed = True

@@ -21,8 +21,11 @@ below only cover Cloud-specific, non-obvious details.
 - No `.env` is required for local dev if Postgres is on localhost with the
   default URL (`INTERNAL_API_SECRET=dev-internal-secret`).
 - Alembic migrations run automatically on app startup (`upgrade head`); there is
-  no manual migration step for local dev. Current head is `001` (PostgreSQL
-  baseline, including Better Auth tables).
+  no manual migration step for local dev. Current head is `003` (`users.role` for
+  admin access; `002` is `ai_evaluations`; `001` is the PostgreSQL baseline).
+- Super admin: set `users.role = 'admin'` (default is `user`). Then `/v1/admin/*`
+  accepts that user's Better Auth JWT. Bootstrap example:
+  `UPDATE users SET role = 'admin' WHERE email = 'you@example.com';`
 - `GET /health` returns DB status and the current migration head — use it as a
   readiness check.
 

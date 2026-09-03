@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime
 
+from decimal import Decimal
+
 from sqlalchemy import (
     Boolean,
     DateTime,
@@ -8,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     func,
@@ -43,6 +46,7 @@ class User(Base):
     risk_percent: Mapped[float] = mapped_column(Float, default=1.0)
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False)
     default_broker: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    role: Mapped[str] = mapped_column(String(16), default="user", server_default="user")
     created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
     updated_at: Mapped[datetime | None] = mapped_column(TzDateTime, nullable=True)
 
@@ -52,6 +56,7 @@ class User(Base):
     inbound_webhooks: Mapped[list["InboundWebhook"]] = relationship(back_populates="user")
     alerts: Mapped[list["InboundAlert"]] = relationship(back_populates="user")
     trades: Mapped[list["TradeExecution"]] = relationship(back_populates="user")
+    ai_evaluations: Mapped[list["AiEvaluation"]] = relationship(back_populates="user")
     review: Mapped["Review | None"] = relationship(back_populates="user", uselist=False)
 
 
@@ -241,6 +246,35 @@ class ProcessedWebhookEvent(Base):
     source: Mapped[str] = mapped_column(String(32))
     event_id: Mapped[str] = mapped_column(String(128), unique=True)
     created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+
+
+class AiEvaluation(Base):
+    __tablename__ = "ai_evaluations"
+    __table_args__ = (
+        Index("ix_ai_evaluations_created_at", "created_at"),
+        Index("ix_ai_evaluations_user_created", "user_id", "created_at"),
+        Index("ix_ai_evaluations_kind_created", "kind", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), index=True)
+    alert_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("inbound_alerts.id"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    generation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    decision: Mapped[str] = mapped_column(String(16))
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TzDateTime, server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="ai_evaluations")
 
 
 class TradeExecution(Base):

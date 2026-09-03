@@ -18,6 +18,7 @@ class UserResponse(BaseModel):
     api_key: str | None = None
     can_process_trades: bool
     onboarding_completed: bool
+    role: str
 
 
 @router.get("/me", response_model=UserResponse)
@@ -41,4 +42,5 @@ def _user_response(user: User, api_key: str | None = None) -> UserResponse:
         api_key=api_key,
         can_process_trades=can_process_trades(user),
         onboarding_completed=user.onboarding_completed,
+        role=user.role or "user",
     )

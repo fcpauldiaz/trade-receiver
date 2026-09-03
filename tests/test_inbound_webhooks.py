@@ -100,7 +100,11 @@ async def test_parse_alert_uses_gateway(monkeypatch):
     monkeypatch.setattr(settings, "openai_api_key", None)
 
     async def fake_chat(**kwargs):
-        return TradeIntent(
+        from decimal import Decimal
+
+        from app.services.llm import LlmCompletion
+
+        content = TradeIntent(
             action="buy_to_open",
             underlying="SPY",
             strike=580,
@@ -108,6 +112,16 @@ async def test_parse_alert_uses_gateway(monkeypatch):
             confidence=0.9,
             rationale="gateway parse",
         ).model_dump(mode="json")
+        return LlmCompletion(
+            content=content,
+            model="openai/gpt-4o-mini",
+            generation_id="chatcmpl-test",
+            prompt_tokens=10,
+            completion_tokens=20,
+            total_tokens=30,
+            latency_ms=12,
+            cost_usd=Decimal("0.000013"),
+        )
 
     monkeypatch.setattr("app.agents.parse_alert.chat_json_completion", fake_chat)
     intent = await parse_alert("BTO SPY 580C 6/20")

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
 
-from app.models.tables import InboundAlert, InboundWebhook, TradeExecution, WebhookIngestEvent
+from app.models.tables import InboundAlert, InboundWebhook, TradeExecution, User, WebhookIngestEvent
 from app.services.webhook_ingest_audit import parse_stored_payload
 from app.services.webhook_normalize import normalize_webhook_body
 
@@ -32,6 +32,8 @@ class AlertAuditItem(BaseModel):
     trade_id: str | None
     trade_status: str | None
     payload: dict[str, Any] | list[Any] | str | None = None
+    user_id: str | None = None
+    user_email: str | None = None
 
 
 def payload_preview(raw_payload: str) -> tuple[str, str, str, str]:
@@ -185,6 +187,68 @@ def list_alert_audit(db: Session, user_id: str, limit: int = 100) -> list[AlertA
         alert = alerts_by_id.get(event.alert_id) if event.alert_id else None
         trade = trade_by_alert.get(event.alert_id) if event.alert_id else None
         items.append(_alert_audit_from_webhook_event(event, webhook, alert, trade))
+
+    items.sort(key=lambda item: item.created_at, reverse=True)
+    return items[:limit]
+
+
+def list_alert_audit_admin(
+    db: Session,
+    *,
+    limit: int = 100,
+    email: str | None = None,
+    outcome: str | None = None,
+    from_dt: datetime | None = None,
+    to_dt: datetime | None = None,
+) -> list[AlertAuditItem]:
+    ingest_q = db.query(InboundAlert, User).join(User, InboundAlert.user_id == User.id).filter(
+        InboundAlert.inbound_webhook_id.is_(None)
+    )
+    webhook_q = (
+        db.query(WebhookIngestEvent, InboundWebhook, User)
+        .join(InboundWebhook, WebhookIngestEvent.inbound_webhook_id == InboundWebhook.id)
+        .join(User, WebhookIngestEvent.user_id == User.id)
+    )
+    if email:
+        like = f"%{email.strip()}%"
+        ingest_q = ingest_q.filter(User.email.ilike(like))
+        webhook_q = webhook_q.filter(User.email.ilike(like))
+    if from_dt is not None:
+        ingest_q = ingest_q.filter(InboundAlert.created_at >= from_dt)
+        webhook_q = webhook_q.filter(WebhookIngestEvent.created_at >= from_dt)
+    if to_dt is not None:
+        ingest_q = ingest_q.filter(InboundAlert.created_at <= to_dt)
+        webhook_q = webhook_q.filter(WebhookIngestEvent.created_at <= to_dt)
+
+    ingest_rows = ingest_q.order_by(InboundAlert.created_at.desc()).limit(limit).all()
+    webhook_events = webhook_q.order_by(WebhookIngestEvent.created_at.desc()).limit(limit).all()
+
+    alert_ids = [row.id for row, _ in ingest_rows]
+    alert_ids.extend(event.alert_id for event, _, _ in webhook_events if event.alert_id)
+    trade_by_alert = _trade_by_alert(db, alert_ids)
+
+    alerts_by_id: dict[str, InboundAlert] = {}
+    if alert_ids:
+        linked_alerts = db.query(InboundAlert).filter(InboundAlert.id.in_(alert_ids)).all()
+        alerts_by_id = {row.id: row for row in linked_alerts}
+
+    items: list[AlertAuditItem] = []
+    for row, user in ingest_rows:
+        item = _alert_audit_from_ingest(row, trade_by_alert.get(row.id))
+        item.user_id = user.id
+        item.user_email = user.email
+        items.append(item)
+
+    for event, webhook, user in webhook_events:
+        alert = alerts_by_id.get(event.alert_id) if event.alert_id else None
+        trade = trade_by_alert.get(event.alert_id) if event.alert_id else None
+        item = _alert_audit_from_webhook_event(event, webhook, alert, trade)
+        item.user_id = user.id
+        item.user_email = user.email
+        items.append(item)
+
+    if outcome:
+        items = [item for item in items if item.outcome == outcome]
 
     items.sort(key=lambda item: item.created_at, reverse=True)
     return items[:limit]
