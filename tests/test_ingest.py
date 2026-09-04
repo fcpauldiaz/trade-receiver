@@ -7,9 +7,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.agents.filter_trade import FilterDecision
+from app.api import ingest as ingest_api
 from app.config import settings
 from app.models.tables import InboundAlert, Subscription, User
 from tests.test_e2e import FakeAdapter, _seed_paid_user
+
+ingest_logger = ingest_api.logger
 
 _ALERT = {"title": "Alert", "body": "BTO SPY 580C 6/20 @ 2.50"}
 _ETERMINAL = {
@@ -72,6 +75,39 @@ def test_ingest_active_subscription(ingest_client, db_session: Session):
     )
     assert res.status_code == 200
     assert res.json()["status"] in {"filled", "skipped", "rejected", "duplicate", "validation_failed"}
+
+
+def test_ingest_logs_incoming_payload(ingest_client, db_session: Session, monkeypatch):
+    user, _ = _seed_paid_user(db_session)
+    token = "test-api-key-logs"
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    messages: list[str] = []
+    original_info = ingest_logger.info
+
+    def capture_info(msg, *args, **kwargs):
+        messages.append(msg % args if args else str(msg))
+        return original_info(msg, *args, **kwargs)
+
+    monkeypatch.setattr(ingest_logger, "info", capture_info)
+
+    payload = {"title": "Desktop Log", "body": "BTO SPY 580C 6/20 @ 2.50"}
+    res = ingest_client.post(
+        "/v1/ingest",
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert res.status_code == 200
+    received = [m for m in messages if "desktop ingest received" in m]
+    completed = [m for m in messages if "desktop ingest completed" in m]
+    assert len(received) == 1
+    assert user.id in received[0]
+    assert "Desktop Log" in received[0]
+    assert "BTO SPY 580C" in received[0]
+    assert len(completed) == 1
+    assert f"status={res.json()['status']}" in completed[0]
 
 
 def test_ingest_inactive_subscription(ingest_client, db_session: Session):

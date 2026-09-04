@@ -12,6 +12,16 @@ from app.services.jwt_auth import hash_api_key, verify_better_auth_jwt
 logger = logging.getLogger(__name__)
 
 
+def client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        ip = forwarded.split(",")[0].strip()
+        return ip[:64] if ip else None
+    if request.client:
+        return request.client.host[:64]
+    return None
+
+
 def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):

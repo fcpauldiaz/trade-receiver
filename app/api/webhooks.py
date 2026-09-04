@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import client_ip, get_current_user
 from app.config import settings
 from app.database import get_db
 from app.models.tables import InboundAlert, InboundWebhook, User
@@ -16,7 +16,10 @@ from app.services.ingest_pipeline import (
     process_inbound_alert,
     resolve_idempotency_key,
 )
-from app.services.webhook_ingest_audit import safe_record_webhook_ingest_event
+from app.services.webhook_ingest_audit import (
+    safe_record_webhook_ingest_event,
+    serialize_webhook_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +125,14 @@ async def receive_webhook(
         raise HTTPException(status_code=404, detail="Webhook owner not found")
 
     body = await request.json()
+    source = client_ip(request)
+    logger.info(
+        "webhook ingest received webhook_id=%s user_id=%s source_ip=%s payload=%s",
+        webhook_id,
+        user.id,
+        source or "-",
+        serialize_webhook_payload(body),
+    )
     async with ingest_processing_slot(user.id):
         try:
             result = await process_inbound_alert(db, user, body, webhook_id=webhook_id)
@@ -141,6 +152,13 @@ async def receive_webhook(
                     "alert_id": alert.id if alert is not None else None,
                     "detail": exc.detail,
                 }
+                logger.info(
+                    "webhook ingest completed webhook_id=%s user_id=%s status=%s alert_id=%s",
+                    webhook_id,
+                    user.id,
+                    inactive_result["status"],
+                    inactive_result["alert_id"],
+                )
                 safe_record_webhook_ingest_event(
                     db,
                     user_id=user.id,
@@ -150,7 +168,12 @@ async def receive_webhook(
                 )
             raise
         except Exception as exc:
-            logger.exception("webhook processing failed webhook_id=%s", webhook_id)
+            logger.exception(
+                "webhook processing failed webhook_id=%s user_id=%s payload=%s",
+                webhook_id,
+                user.id,
+                serialize_webhook_payload(body),
+            )
             db.rollback()
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -160,6 +183,13 @@ async def receive_webhook(
         if alert is not None:
             result = {**result, "alert_id": alert.id}
 
+    logger.info(
+        "webhook ingest completed webhook_id=%s user_id=%s status=%s alert_id=%s",
+        webhook_id,
+        user.id,
+        result.get("status"),
+        result.get("alert_id"),
+    )
     safe_record_webhook_ingest_event(
         db,
         user_id=user.id,

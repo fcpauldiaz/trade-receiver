@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.agents.parse_alert import parse_alert, parse_alert_rules
+from app.api import webhooks as webhooks_api
 from app.brokers.ninjatrader import NinjaTraderAdapter
 from app.config import settings
 from app.models.tables import BrokerConnection, Subscription, User
@@ -17,6 +18,8 @@ from app.services.futures_trade import (
     parse_futures_alert_rules,
 )
 from tests.test_e2e import FakeAdapter, _seed_paid_user
+
+webhooks_logger = webhooks_api.logger
 
 
 @pytest.fixture(autouse=True)
@@ -64,6 +67,45 @@ def test_receive_webhook_unknown_id_returns_404(client):
         json={"title": "Alert", "body": "BTO SPY"},
     )
     assert res.status_code == 404
+
+
+def test_receive_webhook_logs_incoming_payload(client, db_session: Session, monkeypatch):
+    user, _ = _seed_paid_user(db_session)
+    token = "user-api-key-logs"
+    user.api_key_hash = hashlib.sha256(token.encode()).hexdigest()
+    db_session.commit()
+
+    create = client.post(
+        "/v1/me/webhooks",
+        json={"name": "LogCheck"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create.status_code == 200
+    webhook_id = create.json()["id"]
+    payload = {"title": "Log Alert", "body": "BTO SPY 580C 6/20 @ 2.50"}
+
+    messages: list[str] = []
+    original_info = webhooks_logger.info
+
+    def capture_info(msg, *args, **kwargs):
+        messages.append(msg % args if args else str(msg))
+        return original_info(msg, *args, **kwargs)
+
+    monkeypatch.setattr(webhooks_logger, "info", capture_info)
+
+    ok = client.post(f"/v1/webhooks/{webhook_id}", json=payload)
+
+    assert ok.status_code == 200
+    received = [m for m in messages if "webhook ingest received" in m]
+    completed = [m for m in messages if "webhook ingest completed" in m]
+    assert len(received) == 1
+    assert webhook_id in received[0]
+    assert user.id in received[0]
+    assert "Log Alert" in received[0]
+    assert "BTO SPY 580C" in received[0]
+    assert len(completed) == 1
+    assert webhook_id in completed[0]
+    assert f"status={ok.json()['status']}" in completed[0]
 
 
 def test_structured_futures_payload_mapping():
